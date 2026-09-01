@@ -1,0 +1,16 @@
+{
+  "name": "vega-ticket-sistem",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Vega Ticket Sistem — Vega ERP carileri üzerinde sözleşme/süre takibi ve ticket yönetimi. VegaDB salt-okunur, ticket verisi ayrı VEGATICKETDB'de.",
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
+    "dist": "npm run dist --prefix desktop"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

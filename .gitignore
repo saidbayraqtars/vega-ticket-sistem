@@ -1,0 +1,14 @@
+node_modules/
+dist/
+server/node_modules/
+client/node_modules/
+desktop/node_modules/
+server/public/
+server/config.json
+server/logs/
+*.log
+.env
+.env.*
+.claude/
+Thumbs.db
+.DS_Store

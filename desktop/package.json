@@ -1,0 +1,80 @@
+{
+  "name": "vega-ticket-desktop",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Vega Ticket Sistem — Electron masaüstü sarmalayıcı",
+  "main": "main.js",
+  "author": "Said Bayraktar",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "dist:dir": "electron-builder --win --dir --publish never",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^44.1.0",
+    "electron-builder": "^26.15.7"
+  },
+  "build": {
+    "appId": "com.vega.ticket",
+    "productName": "Vega Ticket",
+    "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "saidbayraqtars",
+        "repo": "vega-ticket-sistem-releases",
+        "releaseType": "release"
+      }
+    ],
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../server",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!node_modules/**",
+          "!logs/**",
+          "!config.json",
+          "!**/*.log",
+          "!tests/**",
+          "!node_modules/nodemon/**",
+          "!node_modules/.bin/**",
+          "!node_modules/{touch,undefsafe,simple-update-notifier,pstree.remy,ignore-by-default}/**"
+        ]
+      },
+      {
+        "from": "../server/node_modules",
+        "to": "server/node_modules",
+        "filter": [
+          "**/*",
+          "!.bin/**",
+          "!nodemon/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

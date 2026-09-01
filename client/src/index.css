@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@theme {
+  --color-kagit: #f6f7f9;
+  --color-cizgi: #dfe3e8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-kagit);
+  color: #1b1f24;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+}
+
+/* Excel benzeri yoğun tablo */
+.izgara {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+.izgara th,
+.izgara td {
+  border-right: 1px solid var(--color-cizgi);
+  border-bottom: 1px solid var(--color-cizgi);
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+.izgara thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #eef1f5;
+  font-weight: 600;
+  text-align: left;
+  user-select: none;
+  cursor: pointer;
+}
+.izgara tbody tr:nth-child(even) {
+  background: #fbfcfd;
+}
+.izgara tbody tr:hover {
+  background: #eaf3ff;
+}
+.izgara tbody tr[data-secili="1"] {
+  background: #d8e9ff;
+}
+.izgara td.sayi {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hücre içi düzenleme */
+.hucre-giris {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  padding: 2px 4px;
+}
+
+.rozet {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+}
+.rozet-aktif {
+  background: #dcfce7;
+  color: #14532d;
+}
+.rozet-bitiyor {
+  background: #fef3c7;
+  color: #78350f;
+}
+.rozet-doldu {
+  background: #fee2e2;
+  color: #7f1d1d;
+}
+.rozet-yok {
+  background: #e5e7eb;
+  color: #374151;
+}
