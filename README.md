@@ -62,10 +62,12 @@ Yeni sürüm yayınlama sırası:
 # package.json sürümlerini yükselt
 npm test --prefix server
 npm run build --prefix client
-npm run release --prefix desktop
+npm run release
 ```
 
-Yayın komutu için GitHub yazma yetkili `GH_TOKEN` bulunmalıdır. Kaynak kod
+Kök yayın betiği sürüm tag'ini release deposunda hazırlar, testleri çalıştırır,
+istemciyi derler ve Electron kurulumunu GitHub'a yükler. Komut için GitHub
+yazma yetkili `GH_TOKEN` bulunmalıdır. Kaynak kod
 `saidbayraqtars/vega-ticket-sistem`, kurulum dosyaları ise ayrı ve herkese açık
 `saidbayraqtars/vega-ticket-sistem-releases` deposundadır.
 
