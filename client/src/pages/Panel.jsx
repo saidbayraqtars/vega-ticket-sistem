@@ -4,6 +4,7 @@ import Arama from "../components/Arama";
 import CariIzgara from "../components/CariIzgara";
 import CariDetay from "../components/CariDetay";
 import TicketIzgara from "../components/TicketIzgara";
+import ServisEkrani from "../components/ServisEkrani";
 
 const SAYFA = 300;
 
@@ -65,11 +66,14 @@ export default function Panel({ firmaNo, donemNo, onAyarlar }) {
         <div className="mt-3 flex gap-2">
           <Sekme aktif={gorunum === "musteriler"} onClick={() => setGorunum("musteriler")}>Müşteriler</Sekme>
           <Sekme aktif={gorunum === "ticketlar"} onClick={() => setGorunum("ticketlar")}>Tamamlanan işlemler</Sekme>
+          <Sekme aktif={gorunum === "servis"} onClick={() => setGorunum("servis")}>Servis kabul</Sekme>
         </div>
       </header>
 
       {gorunum === "ticketlar" ? (
         <div className="min-h-0 flex-1"><TicketIzgara firmaNo={firmaNo} tetik={ticketTetik} /></div>
+      ) : gorunum === "servis" ? (
+        <div className="min-h-0 flex-1"><ServisEkrani firmaNo={firmaNo} donemNo={donemNo} /></div>
       ) : (
         <>
           <div className="flex items-center border-b bg-white px-3 py-1.5">

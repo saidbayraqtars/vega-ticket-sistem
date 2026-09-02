@@ -9,6 +9,7 @@ const borc = (r) => {
 const SUTUNLAR = [
   { anahtar: "kod", baslik: "Cari Kodu", genislik: 135, deger: (r) => r.FIRMAKODU },
   { anahtar: "ad", baslik: "Müşteri", genislik: 360, deger: (r) => r.AD },
+  { anahtar: null, baslik: "Müşteri Türü", genislik: 150, deger: (r) => r.sure?.tur || "Tanımsız" },
   { anahtar: null, baslik: "Borç Durumu", genislik: 120, ozel: true },
   { anahtar: "bakiye", baslik: "Bakiye", genislik: 135, sayi: true, deger: (r) => `${tl(r.BAKIYE)} ₺` },
   { anahtar: null, baslik: "Tanımlı Süre", genislik: 125, deger: (r) => r.sure?.sureAy ? `${r.sure.sureAy} ay` : "—" },

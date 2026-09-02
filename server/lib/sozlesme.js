@@ -30,14 +30,38 @@ function trUpper(s) {
 const TUR_ANLASMALI = "ANLAŞMALI";
 const TUR_YENI = "YENİ MÜŞTERİ";
 
+/**
+ * Özel kod serbest metin olabildiği için Türkçe karakter ve noktalama farkını
+ * kaldırır. Böylece "antlaşmalı cari", "anlaşma" ve "sozlesmeli" gibi aynı
+ * anlamdaki yazımlar tek kurala düşer.
+ */
+function turAnahtari(value) {
+  return trUpper(value)
+    .replace(/Ç/g, "C")
+    .replace(/Ğ/g, "G")
+    .replace(/İ/g, "I")
+    .replace(/Ö/g, "O")
+    .replace(/Ş/g, "S")
+    .replace(/Ü/g, "U")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
 /** KOD1 ham değerini bilinen türe indirger. Tanınmayan değer → null. */
 function normalizeTur(kod1) {
-  const v = trUpper(kod1).trim();
+  const v = turAnahtari(kod1);
   if (!v) return null;
-  if (v === TUR_ANLASMALI || v === "ANLASMALI" || v === "SÖZLEŞMELİ" || v === "SOZLESMELI") {
+
+  const kelimeler = v.split(" ");
+  const anlasmali = kelimeler.some((kelime) =>
+    /^(?:ANT?LASMA|SOZLESME)(?:LI|LIDIR)?$/.test(kelime)
+  );
+  if (anlasmali) {
     return TUR_ANLASMALI;
   }
-  if (v === TUR_YENI || v === "YENI MÜŞTERİ" || v === "YENİ MUSTERI" || v === "YENI MUSTERI") {
+
+  const bitisik = v.replace(/\s+/g, "");
+  if (bitisik === "YENIMUSTERI" || (kelimeler.includes("YENI") && kelimeler.includes("MUSTERI"))) {
     return TUR_YENI;
   }
   return null; // '120' gibi muhasebe kodları ve serbest metinler tür değildir
@@ -114,17 +138,24 @@ function hesaplaSozlesme(cari, bugun = new Date()) {
   const baslangic = parseSozlesmeTarihi(cari?.FAKS);
 
   if (!baslangic) {
+    const anlasmali = tur === TUR_ANLASMALI;
+    const yeni = tur === TUR_YENI;
     return {
       sozlesmeli: false,
       tur,
       turHam,
-      etiket: tur === TUR_ANLASMALI ? "Anlaşmalı (tarihsiz)" : "Sözleşmesiz",
+      etiket: anlasmali ? "Anlaşmalı (1 yıl)" : yeni ? "Yeni müşteri" : "Müşteri türü tanımsız",
       rozet: "yok",
       baslangic: null,
       bitis: null,
-      sureAy: null,
+      // Anlaşmalı türünde süre seçimi kullanıcıya bırakılmaz: özel koddaki tür
+      // tek başına 12 aylık varsayılanı belirler. Tarih yoksa bitiş hesaplanamaz.
+      sureAy: anlasmali ? AY_ANLASMALI : null,
       kalanGun: null,
-      uyari: tur === TUR_ANLASMALI ? "Tür ANLAŞMALI ama FAKS alanında sözleşme tarihi yok." : null,
+      sureTanimlanabilir: yeni,
+      uyari: anlasmali
+        ? "Anlaşmalı müşteri için 1 yıl tanımlandı; FAKS alanında başlangıç tarihi olmadığı için bitiş hesaplanamadı."
+        : turHam && !yeni ? `Özel kod ("${turHam}") müşteri türü olarak tanınmadı.` : null,
     };
   }
 
@@ -137,11 +168,13 @@ function hesaplaSozlesme(cari, bugun = new Date()) {
   else if (kalanGun <= BITIYOR_ESIGI_GUN) rozet = "bitiyor";
   else rozet = "aktif";
 
-  const etiket = tur === TUR_ANLASMALI ? "Anlaşmalı (1 yıl)" : "Yeni müşteri (6 ay)";
+  const etiket = tur === TUR_ANLASMALI
+    ? "Anlaşmalı (1 yıl)"
+    : tur === TUR_YENI ? "Yeni müşteri (6 ay)" : "Tür tanımsız (6 ay varsayılan)";
 
   return {
     sozlesmeli: true,
-    tur: tur ?? TUR_YENI,
+    tur,
     turHam,
     etiket,
     rozet,
@@ -151,6 +184,7 @@ function hesaplaSozlesme(cari, bugun = new Date()) {
     bitisISO: isoFmt(bitis),
     sureAy,
     kalanGun,
+    sureTanimlanabilir: tur === TUR_YENI,
     uyari: tur === null && turHam ? `Tür alanı ("${turHam}") tanınmadı, 6 ay varsayıldı.` : null,
   };
 }
@@ -162,6 +196,7 @@ module.exports = {
   TUR_ANLASMALI,
   TUR_YENI,
   trUpper,
+  turAnahtari,
   normalizeTur,
   parseSozlesmeTarihi,
   ayEkle,

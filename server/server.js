@@ -8,6 +8,10 @@ const cfg = require("./lib/config");
 const kurulumRoute = require("./routes/kurulum");
 const cariRoute = require("./routes/cari");
 const ticketRoute = require("./routes/ticket");
+const servisRoute = require("./routes/servis");
+const etiketRoute = require("./routes/etiket");
+const whatsappRoute = require("./routes/whatsapp");
+const whatsappWorker = require("./lib/whatsappWorker");
 
 const PORT = parseInt(process.env.PORT, 10) || 3010;
 const app = express();
@@ -38,7 +42,9 @@ app.use((req, res, next) => {
 // muaf — Electron açılışta /saglik'i yoklayarak sunucunun ayakta olduğunu
 // anlıyor, o yüzden DB kopukken de 200 dönmeli.
 app.use("/api", (req, res, next) => {
-  if (req.path.startsWith("/kurulum") || req.path === "/saglik") return next();
+  // /etiket muaf: yazıcı seçimi ve deneme baskısı yerel yetenek, DB istemez.
+  // Etiket basımı DB gerektirdiği için kontrolü kendi ucunda yapar.
+  if (req.path.startsWith("/kurulum") || req.path.startsWith("/etiket") || req.path === "/saglik") return next();
   if (!db.bagliMi()) {
     return res.status(503).json({ ok: false, baglantiYok: true, mesaj: "Veritabanı bağlantısı yok." });
   }
@@ -48,9 +54,12 @@ app.use("/api", (req, res, next) => {
 app.use("/api/kurulum", kurulumRoute);
 app.use("/api/cari", cariRoute);
 app.use("/api/ticket", ticketRoute);
+app.use("/api/servis", servisRoute);
+app.use("/api/etiket", etiketRoute);
+app.use("/api/whatsapp", whatsappRoute);
 
 app.get("/api/saglik", (req, res) => {
-  res.json({ ok: true, bagli: db.bagliMi(), kullanici: req.kullanici, surum: require("./package.json").version });
+  res.json({ ok: true, bagli: db.bagliMi(), baglaniyor: db.baglaniyorMu(), kullanici: req.kullanici, surum: require("./package.json").version });
 });
 
 // Electron/production'da derlenmiş arayüz aynı sunucudan servis edilir
@@ -65,22 +74,43 @@ app.use((err, req, res, next) => {
   res.status(500).json({ ok: false, mesaj: err.message });
 });
 
-async function baslat() {
+/**
+ * Veritabanına arka planda bağlanır. Açılışı bloklamaz: SQL sunucusu uzakta
+ * veya kapalıysa üç havuzun zaman aşımı toplanıp 45 sn'yi bulabiliyor,
+ * Electron ise 30 sn sonra "Sunucu yanıt vermedi" deyip uygulamayı kapatıyordu.
+ * Pencere hemen açılsın, bağlantı hazır olunca arayüz kendi tazeler.
+ */
+async function veritabaninaBaglan() {
   const kayitli = cfg.readConfig();
-  if (kayitli?.password) {
-    try {
-      await db.baglan(kayitli);
-      console.log(`[db] bağlandı → ${kayitli.server}/${kayitli.database} + ${kayitli.ticketDatabase}`);
-    } catch (err) {
-      console.error("[db] otomatik bağlantı başarısız:", err.message);
-    }
-  } else {
+  if (!kayitli?.password) {
     console.log("[db] kayıtlı ayar yok — arayüzden kurulum yapın.");
+    return;
   }
+  try {
+    await db.baglan(kayitli);
+    console.log(`[db] bağlandı → ${kayitli.server}/${kayitli.database} + ${kayitli.ticketDatabase}`);
+  } catch (err) {
+    console.error("[db] otomatik bağlantı başarısız:", err.message);
+  }
+}
+
+async function baslat() {
+  // Önce dinlemeye başla — /api/saglik anında yanıt versin.
   app.listen(PORT, "127.0.0.1", () => console.log(`[server] http://127.0.0.1:${PORT}`));
+  // Ortak ayarda bu bilgisayar ana makineyse QR oturumunu ve DB mesaj kuyruğunu
+  // çalıştırır. İstemci makinelerde yerel WhatsApp oturumu hiç açılmaz.
+  whatsappWorker.baslat();
+  await veritabaninaBaglan();
 }
 
 process.on("SIGINT", async () => {
+  whatsappWorker.kapat();
+  await db.kapat();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  whatsappWorker.kapat();
   await db.kapat();
   process.exit(0);
 });

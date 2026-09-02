@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, kullaniciAyarla } from "../api/client";
+import WhatsAppAyarlari from "../components/WhatsAppAyarlari";
+import EtiketAyarlari from "../components/EtiketAyarlari";
 
 export default function Kurulum({ durum, onBitti }) {
   const [form, setForm] = useState({
@@ -151,12 +153,13 @@ export default function Kurulum({ durum, onBitti }) {
       </fieldset>
 
       {bagli && (
-        <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
-          <legend className="px-1 text-[12px] font-semibold text-gray-600">Firma, dönem ve kullanıcı</legend>
-          {!firmalar ? (
-            <div className="text-[12px] text-gray-500">Firmalar yükleniyor…</div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3">
+        <>
+          <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
+            <legend className="px-1 text-[12px] font-semibold text-gray-600">Firma, dönem ve kullanıcı</legend>
+            {!firmalar ? (
+              <div className="text-[12px] text-gray-500">Firmalar yükleniyor…</div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
               <label className="text-[12px]">
                 <span className="mb-1 block text-gray-600">Firma</span>
                 <select
@@ -195,18 +198,21 @@ export default function Kurulum({ durum, onBitti }) {
                 onChange={(e) => setKullanici(e.target.value)}
                 ipucu="Ticketlarda kim yaptı bilgisi"
               />
+              </div>
+            )}
+            <div className="mt-3">
+              <button
+                onClick={secimiKaydet}
+                disabled={mesgul || !firmaNo || !donemNo || !kullanici.trim()}
+                className="rounded bg-emerald-600 px-4 py-1 text-white disabled:opacity-40"
+              >
+                Devam et
+              </button>
             </div>
-          )}
-          <div className="mt-3">
-            <button
-              onClick={secimiKaydet}
-              disabled={mesgul || !firmaNo || !donemNo || !kullanici.trim()}
-              className="rounded bg-emerald-600 px-4 py-1 text-white disabled:opacity-40"
-            >
-              Devam et
-            </button>
-          </div>
-        </fieldset>
+          </fieldset>
+          <WhatsAppAyarlari />
+          <EtiketAyarlari />
+        </>
       )}
 
       {mesaj && <div className="rounded bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">{mesaj}</div>}

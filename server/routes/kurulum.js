@@ -35,6 +35,7 @@ router.get("/durum", (req, res) => {
     ok: true,
     yapilandirildi: Boolean(kayitli?.password),
     bagli: db.bagliMi(),
+    baglaniyor: db.baglaniyorMu(),
     config: guvenliConfig(kayitli),
     iceAktarilabilir,
   });

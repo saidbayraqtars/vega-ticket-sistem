@@ -5,6 +5,7 @@ const vega = require("../lib/vega");
 const arama = require("../lib/arama");
 const cariCache = require("../lib/cariCache");
 const { hesaplaMusteriSuresi } = require("../lib/musteriSuresi");
+const { normalizeTur, TUR_YENI } = require("../lib/sozlesme");
 const { tarihCevir } = require("../lib/ticketKurallari");
 
 const router = express.Router();
@@ -15,6 +16,66 @@ async function sureHaritasi(firmaNo) {
     FROM dbo.CARISURELERI WHERE FIRMANO = @firma
   `);
   return new Map(r.recordset.map((x) => [x.CARIIND, x]));
+}
+
+/**
+ * Süre tablosunun parmak izi. ROWVERSION veritabanı genelinde artan olduğu
+ * için satır sayısı + en büyük RV, tablodaki her değişikliği yakalar.
+ */
+function sureImzasi(sureler) {
+  let enBuyuk = "";
+  for (const kayit of sureler.values()) {
+    const rv = kayit.RV ? Buffer.from(kayit.RV).toString("hex") : "";
+    if (rv > enBuyuk) enBuyuk = rv;
+  }
+  return `${sureler.size}:${enBuyuk}`;
+}
+
+/**
+ * Zenginleştirilmiş ve sıralanmış liste önbelleği.
+ *
+ * Bu iş 39 bin kartta ~130 ms CPU tutuyordu ve Node tek iş parçacıklı olduğu
+ * için HER istekte sunucunun tamamını o süre boyunca kilitliyordu — sayfa
+ * değiştirme, sıralama, tazeleme, hepsi. Girdiler (cari önbelleği + süre
+ * tablosu) değişmediği sürece sonucu yeniden kullanıyoruz.
+ */
+const listeBellek = new Map();
+const LISTE_BELLEK_SINIRI = 12;
+// localeCompare her çağrıda yerel ayarı yeniden çözer; tek Collator ~2 kat hızlı.
+const trSirala = new Intl.Collator("tr", { sensitivity: "base", numeric: true });
+
+function siraliListe(firmaNo, donemNo, onbellek, sureler, sirala, yon) {
+  // Gün de imzaya girer: sözleşme durumu "bugün"e göre hesaplandığı için
+  // gece yarısını geçen oturumda önbellek kendiliğinden tazelenmeli.
+  const gun = new Date().toISOString().slice(0, 10);
+  const imza = `${gun}|${onbellek.ts}|${sureImzasi(sureler)}`;
+  const anahtar = `${firmaNo}:${donemNo}:${sirala}:${yon}`;
+  const mevcut = listeBellek.get(anahtar);
+  if (mevcut?.imza === imza) return mevcut.liste;
+
+  const bugun = new Date();
+  const liste = onbellek.rows.map((r) => zenginlestir(r, sureler, bugun));
+  const carpan = yon === "desc" ? -1 : 1;
+  liste.sort((a, b) => {
+    if (sirala === "bakiye") return (Number(a.BAKIYE) - Number(b.BAKIYE)) * carpan;
+    if (sirala === "kod") return trSirala.compare(a.FIRMAKODU, b.FIRMAKODU) * carpan;
+    if (sirala === "bitis") {
+      const av = String(a.sure.bitisISO || "9999-12-31");
+      const bv = String(b.sure.bitisISO || "9999-12-31");
+      return (av < bv ? -1 : av > bv ? 1 : 0) * carpan;
+    }
+    return trSirala.compare(a.AD, b.AD) * carpan;
+  });
+
+  // Aynı önbellek sürümüne ait eski sıralama girdileri artık geçersiz.
+  for (const [k, v] of listeBellek) if (v.imza !== imza && listeBellek.size > LISTE_BELLEK_SINIRI) listeBellek.delete(k);
+  listeBellek.set(anahtar, { imza, liste });
+  return liste;
+}
+
+/** Süre yazıldığında/silindiğinde çağrılır — imza zaten değişir, bu ek güvence. */
+function listeBellekTemizle() {
+  listeBellek.clear();
 }
 
 function zenginlestir(kart, sureler, bugun = new Date()) {
@@ -33,24 +94,15 @@ router.get("/liste", async (req, res, next) => {
   try {
     const firmaNo = vega.pad4(req.query.firma);
     const donemNo = vega.pad4(req.query.donem);
-    const [{ rows }, sureler] = await Promise.all([
+    const [onbellek, sureler] = await Promise.all([
       cariCache.al(firmaNo, donemNo, { zorla: req.query.yenile === "1" }),
       sureHaritasi(firmaNo),
     ]);
     const limit = Math.min(parseInt(req.query.limit, 10) || 300, 2000);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const sirala = String(req.query.sirala || "ad");
-    const yon = String(req.query.yon || "asc") === "desc" ? -1 : 1;
-    const liste = rows.map((r) => zenginlestir(r, sureler));
-
-    liste.sort((a, b) => {
-      if (sirala === "bakiye") return (Number(a.BAKIYE) - Number(b.BAKIYE)) * yon;
-      if (sirala === "kod") return a.FIRMAKODU.localeCompare(b.FIRMAKODU, "tr") * yon;
-      if (sirala === "bitis") {
-        return String(a.sure.bitisISO || "9999-12-31").localeCompare(String(b.sure.bitisISO || "9999-12-31")) * yon;
-      }
-      return a.AD.localeCompare(b.AD, "tr") * yon;
-    });
+    const yon = String(req.query.yon || "asc") === "desc" ? "desc" : "asc";
+    const liste = siraliListe(firmaNo, donemNo, onbellek, sureler, sirala, yon);
 
     res.json({ ok: true, toplam: liste.length, offset, limit, kayitlar: liste.slice(offset, offset + limit) });
   } catch (err) {
@@ -103,6 +155,12 @@ router.put("/:ind/sure", async (req, res, next) => {
     const { rows } = await cariCache.al(firmaNo, donemNo);
     const kart = rows.find((x) => x.IND === ind);
     if (!kart) return res.status(404).json({ ok: false, mesaj: "Cari bulunamadı." });
+    if (normalizeTur(kart.KOD1) !== TUR_YENI) {
+      return res.status(400).json({
+        ok: false,
+        mesaj: "Süre yalnız özel kodu YENİ MÜŞTERİ olan carilere tanımlanabilir. Anlaşmalı müşteride süre otomatik 1 yıldır.",
+      });
+    }
 
     const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
     await db.ticket().request()
@@ -124,6 +182,7 @@ router.put("/:ind/sure", async (req, res, next) => {
           VALUES (@firma, @cari, CONVERT(date, @baslangic, 23), @sure, @kullanici);
       `);
     const sureler = await sureHaritasi(firmaNo);
+    listeBellekTemizle();
     res.json({ ok: true, kart: zenginlestir(kart, sureler) });
   } catch (err) {
     next(err);
@@ -138,6 +197,7 @@ router.delete("/:ind/sure", async (req, res, next) => {
     if (!Number.isInteger(ind)) return res.status(400).json({ ok: false, mesaj: "Geçersiz cari numarası." });
     await db.ticket().request().input("firma", sql.NVarChar(4), firmaNo).input("cari", sql.Int, ind)
       .query(`DELETE FROM dbo.CARISURELERI WHERE FIRMANO = @firma AND CARIIND = @cari`);
+    listeBellekTemizle();
     res.json({ ok: true });
   } catch (err) {
     next(err);

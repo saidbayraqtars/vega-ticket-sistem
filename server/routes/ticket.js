@@ -4,6 +4,8 @@ const db = require("../lib/db");
 const vega = require("../lib/vega");
 const cariCache = require("../lib/cariCache");
 const { ucretCevir, rvCevir } = require("../lib/ticketKurallari");
+const { bildirimGonder } = require("../lib/whatsappBildirim");
+const whatsappWorker = require("../lib/whatsappWorker");
 
 const router = express.Router();
 const DURUMLAR = ["KAPALI"];
@@ -108,7 +110,33 @@ router.post("/", async (req, res, next) => {
       `);
     const kayit = disaAktar(r.recordset[0]);
     await logYaz(kayit.ID, kullanici, null, null, null, "Tamamlanan işlem kaydedildi.");
-    res.status(201).json({ ok: true, kayit });
+    // Ticket kalıcı yazıldıktan sonra ortak WhatsApp kuyruğuna alınır. Yalnız
+    // seçili ana bilgisayar gönderir; kuyruk sorunu ticket kaydını geri almaz.
+    let whatsapp;
+    try {
+      whatsapp = await bildirimGonder(kart, baslik, {
+        ticketId: kayit.ID,
+        firmaNo,
+        donemNo,
+        kayitTarihi: kayit.KAPANISTARIHI,
+      });
+      // Bu makine ana makineyse bekleme moduna düşmüş döngüyü hemen uyandır;
+      // değilse zararsız, döngü kontrol edip geri döner.
+      whatsappWorker.uyandir();
+    } catch (err) {
+      // İşlem kaydı artık kalıcıdır. Kuyruk arızasını tüm isteği başarısız
+      // göstermeyerek aynı işlemin yanlışlıkla ikinci kez açılmasını önleriz.
+      console.error(`[WhatsApp kuyruk] Ticket ${kayit.ID}: ${err.message}`);
+      whatsapp = {
+        ticketId: kayit.ID,
+        durum: "HATA",
+        gonderildi: false,
+        sirada: false,
+        iptal: false,
+        mesaj: "İşlem kaydedildi; WhatsApp kuyruğuna alınamadı. Tekrar gönderebilirsiniz.",
+      };
+    }
+    res.status(201).json({ ok: true, kayit, whatsapp });
   } catch (err) {
     next(err);
   }

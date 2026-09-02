@@ -1,4 +1,4 @@
-const { ayEkle, fmt, isoFmt, hesaplaSozlesme } = require("./sozlesme");
+const { ayEkle, fmt, isoFmt, hesaplaSozlesme, TUR_YENI } = require("./sozlesme");
 
 function gunFarki(a, b) {
   const ms = 24 * 60 * 60 * 1000;
@@ -13,14 +13,15 @@ function takvimTarihi(value) {
   return new Date(value);
 }
 
-/** Uygulamada tanımlanan 1-12 aylık süre varsa Vega sözleşme kuralının önüne geçer. */
+/** Yalnız yeni müşteride uygulama süresi Vega'daki varsayılanın önüne geçer. */
 function hesaplaMusteriSuresi(cari, sureKaydi, bugun = new Date()) {
-  if (!sureKaydi) return { ...hesaplaSozlesme(cari, bugun), kaynak: "vega" };
+  const vegaSuresi = hesaplaSozlesme(cari, bugun);
+  if (vegaSuresi.tur !== TUR_YENI || !sureKaydi) return { ...vegaSuresi, kaynak: "vega" };
 
   const baslangic = takvimTarihi(sureKaydi.BASLANGICTARIHI);
   const sureAy = Number(sureKaydi.SUREAY);
   if (Number.isNaN(baslangic.getTime()) || !Number.isInteger(sureAy) || sureAy < 1 || sureAy > 12) {
-    return { ...hesaplaSozlesme(cari, bugun), kaynak: "vega" };
+    return { ...vegaSuresi, kaynak: "vega" };
   }
 
   const bitis = ayEkle(baslangic, sureAy);
@@ -39,6 +40,7 @@ function hesaplaMusteriSuresi(cari, sureKaydi, bugun = new Date()) {
     bitisISO: isoFmt(bitis),
     sureAy,
     kalanGun,
+    sureTanimlanabilir: true,
     uyari: null,
     kaynak: "uygulama",
   };

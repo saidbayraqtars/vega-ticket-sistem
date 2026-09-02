@@ -6,6 +6,7 @@ desktop/node_modules/
 server/public/
 server/config.json
 server/logs/
+server/whatsapp-auth/
 *.log
 .env
 .env.*

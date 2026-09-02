@@ -69,4 +69,26 @@ export const api = {
   ticketGuncelle: (id, yama) => istek(`/api/ticket/${id}`, { method: "PATCH", body: JSON.stringify(yama) }),
   ticketSil: (id) => istek(`/api/ticket/${id}`, { method: "DELETE" }),
   ticketLog: (id) => istek(`/api/ticket/${id}/log`),
+
+  servisListe: (p) => istek("/api/servis" + qs(p)),
+  servisDetay: (id) => istek(`/api/servis/${id}`),
+  servisOlustur: (k) => istek("/api/servis", { method: "POST", body: JSON.stringify(k) }),
+  servisGuncelle: (id, yama) => istek(`/api/servis/${id}`, { method: "PATCH", body: JSON.stringify(yama) }),
+  servisSil: (id) => istek(`/api/servis/${id}`, { method: "DELETE" }),
+  servisCihazEkle: (id, cihaz) => istek(`/api/servis/${id}/cihaz`, { method: "POST", body: JSON.stringify(cihaz) }),
+  servisCihazGuncelle: (id, yama) => istek(`/api/servis/cihaz/${id}`, { method: "PATCH", body: JSON.stringify(yama) }),
+
+  etiketYazicilar: () => istek("/api/etiket/yazicilar"),
+  etiketAyar: () => istek("/api/etiket/ayar"),
+  etiketAyarKaydet: (ayar) => istek("/api/etiket/ayar", { method: "POST", body: JSON.stringify(ayar) }),
+  etiketOnizleme: (veri) => istek("/api/etiket/onizleme", { method: "POST", body: JSON.stringify(veri) }),
+  etiketDene: (ayar) => istek("/api/etiket/dene", { method: "POST", body: JSON.stringify({ ayar }) }),
+  etiketDilDene: (ayar) => istek("/api/etiket/dil-dene", { method: "POST", body: JSON.stringify({ ayar }) }),
+  etiketBas: (veri) => istek("/api/etiket/bas", { method: "POST", body: JSON.stringify(veri) }),
+
+  whatsappDurum: () => istek("/api/whatsapp/durum"),
+  whatsappSifirla: () => istek("/api/whatsapp/sifirla", { method: "POST" }),
+  whatsappAnaYap: () => istek("/api/whatsapp/ana-yap", { method: "POST" }),
+  whatsappMesajDurumu: (ticketId) => istek(`/api/whatsapp/mesaj/${ticketId}`),
+  whatsappGonder: (veri) => istek("/api/whatsapp/gonder", { method: "POST", body: JSON.stringify(veri) }),
 };

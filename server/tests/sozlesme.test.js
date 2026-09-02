@@ -10,8 +10,20 @@ const {
 
 test("Türkçe müşteri türleri normalize edilir", () => {
   assert.equal(normalizeTur(" anlaşmalı "), "ANLAŞMALI");
+  assert.equal(normalizeTur("antlaşmalı cari"), "ANLAŞMALI");
+  assert.equal(normalizeTur("ANLAŞMA"), "ANLAŞMALI");
+  assert.equal(normalizeTur("sozlesmeli"), "ANLAŞMALI");
   assert.equal(normalizeTur("YENI MUSTERI"), "YENİ MÜŞTERİ");
+  assert.equal(normalizeTur("anlaşmasız"), null);
   assert.equal(normalizeTur("120"), null);
+});
+
+test("Anlaşmalı müşteri tarihsiz olsa da otomatik 12 ay taşır", () => {
+  const sonuc = hesaplaSozlesme({ KOD1: "antlaşma", FAKS: "" }, new Date(2026, 8, 1));
+  assert.equal(sonuc.tur, "ANLAŞMALI");
+  assert.equal(sonuc.sureAy, 12);
+  assert.equal(sonuc.sureTanimlanabilir, false);
+  assert.equal(sonuc.bitis, null);
 });
 
 test("FAKS yalnız katı gg.aa.yyyy biçiminde tarih kabul eder", () => {

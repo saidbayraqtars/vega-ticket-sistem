@@ -16,6 +16,8 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
   const [sureForm, setSureForm] = useState({ baslangic: bugunYerel(), sureAy: 1 });
   const [kaydediliyor, setKaydediliyor] = useState(false);
   const [sureKaydediliyor, setSureKaydediliyor] = useState(false);
+  const [waBildirim, setWaBildirim] = useState(null);
+  const [waIslemde, setWaIslemde] = useState(false);
 
   async function detayYukle(ind = cariInd) {
     const r = await api.cariDetay(ind, { firma: firmaNo, donem: donemNo });
@@ -31,6 +33,7 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
     setVeri(null);
     setHata(null);
     setForm({ baslik: "", ucret: "" });
+    setWaBildirim(null);
     api.cariDetay(cariInd, { firma: firmaNo, donem: donemNo })
       .then((r) => {
         if (iptal) return;
@@ -42,19 +45,36 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
     return () => { iptal = true; };
   }, [cariInd, firmaNo, donemNo]);
 
+  useEffect(() => {
+    if (!waBildirim?.sirada || !waBildirim?.ticketId) return undefined;
+    let iptal = false;
+    const yenile = async () => {
+      try {
+        const r = await api.whatsappMesajDurumu(waBildirim.ticketId);
+        if (!iptal) setWaBildirim(r.whatsapp);
+      } catch {
+        // Kuyruk yoklaması geçici olarak aksarsa işlem kaydı ve ana ekran etkilenmez.
+      }
+    };
+    const timer = setInterval(yenile, 2000);
+    return () => { iptal = true; clearInterval(timer); };
+  }, [waBildirim?.sirada, waBildirim?.ticketId]);
+
   async function islemEkle(e) {
     e.preventDefault();
     if (!form.baslik.trim() || !veri) return;
     setKaydediliyor(true);
     setHata(null);
     try {
-      await api.ticketOlustur({
+      const islem = form.baslik.trim();
+      const r = await api.ticketOlustur({
         FIRMANO: firmaNo,
         DONEMNO: donemNo,
         CARIIND: veri.kart.IND,
-        BASLIK: form.baslik.trim(),
+        BASLIK: islem,
         UCRET: form.ucret,
       });
+      setWaBildirim(r.whatsapp);
       setForm({ baslik: "", ucret: "" });
       await detayYukle();
       onTicketDegisti?.();
@@ -62,6 +82,29 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
       setHata(err.message);
     } finally {
       setKaydediliyor(false);
+    }
+  }
+
+  async function whatsappTekrarGonder() {
+    if (!waBildirim?.ticketId || waBildirim?.iptal) return;
+    setWaIslemde(true);
+    try {
+      const r = await api.whatsappGonder({
+        firma: firmaNo,
+        donem: donemNo,
+        ticketId: waBildirim.ticketId,
+      });
+      setWaBildirim(r.whatsapp);
+    } catch (err) {
+      setWaBildirim((onceki) => ({
+        ...onceki,
+        ...(err.govde?.whatsapp || {}),
+        gonderildi: false,
+        iptal: err.durum === 410 || err.govde?.iptal || onceki?.iptal,
+        mesaj: err.govde?.whatsapp?.mesaj || err.message,
+      }));
+    } finally {
+      setWaIslemde(false);
     }
   }
 
@@ -91,12 +134,26 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
 
   const { kart, ozet, ticketlar } = veri;
   const bakiyeSinif = ozet.bakiye > 0.005 ? "text-red-700" : ozet.bakiye < -0.005 ? "text-emerald-700" : "text-gray-700";
+  const anlasmali = kart.sure?.tur === "ANLAŞMALI";
+  const yeniMusteri = kart.sure?.tur === "YENİ MÜŞTERİ";
+  const turSinif = anlasmali
+    ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+    : yeniMusteri ? "border-blue-300 bg-blue-50 text-blue-900" : "border-amber-300 bg-amber-50 text-amber-900";
 
   return (
     <div className="flex h-full flex-col bg-[#fbfcfd]">
       <div className="border-b bg-white px-4 py-3">
         <div className="truncate text-[16px] font-semibold">{kart.AD}</div>
         <div className="font-mono text-[11px] text-gray-500">{kart.FIRMAKODU}</div>
+        <div className={`mt-3 rounded-lg border-2 px-3 py-2.5 ${turSinif}`}>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.12em]">Müşteri durumu</div>
+          <div className="mt-0.5 text-[20px] font-bold">
+            {anlasmali ? "ANLAŞMALI MÜŞTERİ" : yeniMusteri ? "YENİ MÜŞTERİ" : "TÜR TANIMLANMAMIŞ"}
+          </div>
+          <div className="text-[11px] opacity-80">
+            Özel kod: {kart.KOD1 || "—"} · {anlasmali ? "Süre otomatik 1 yıl" : yeniMusteri ? "Süre elle tanımlanabilir" : "Özel kod kontrol edilmeli"}
+          </div>
+        </div>
         <div className={`mt-3 rounded border px-3 py-2 ${bakiyeSinif}`}>
           <div className="text-[11px] uppercase tracking-wide">Cari borç durumu</div>
           <div className="text-[20px] font-semibold tabular-nums">{tl(ozet.bakiye)} ₺</div>
@@ -104,22 +161,30 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
         </div>
       </div>
 
-      <form onSubmit={sureKaydet} className="border-b bg-white px-4 py-3">
-        <div className="mb-2 text-[12px] font-semibold">Yeni müşteri süresi</div>
-        <div className="grid grid-cols-[1fr_105px_auto] gap-2">
-          <input type="date" required value={sureForm.baslangic}
-            onChange={(e) => setSureForm({ ...sureForm, baslangic: e.target.value })}
-            className="rounded border border-[#c7ccd4] px-2 py-1.5" />
-          <select value={sureForm.sureAy} onChange={(e) => setSureForm({ ...sureForm, sureAy: Number(e.target.value) })}
-            className="rounded border border-[#c7ccd4] px-2 py-1.5">
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((ay) => <option key={ay} value={ay}>{ay} ay</option>)}
-          </select>
-          <button disabled={sureKaydediliyor} className="rounded bg-slate-700 px-3 py-1.5 text-white disabled:opacity-50">
-            {sureKaydediliyor ? "…" : "Süreyi kaydet"}
-          </button>
+      {kart.sure?.sureTanimlanabilir ? (
+        <form onSubmit={sureKaydet} className="border-b bg-white px-4 py-3">
+          <div className="mb-2 text-[12px] font-semibold">Yeni müşteri süresi</div>
+          <div className="grid grid-cols-[1fr_105px_auto] gap-2">
+            <input type="date" required value={sureForm.baslangic}
+              onChange={(e) => setSureForm({ ...sureForm, baslangic: e.target.value })}
+              className="rounded border border-[#c7ccd4] px-2 py-1.5" />
+            <select value={sureForm.sureAy} onChange={(e) => setSureForm({ ...sureForm, sureAy: Number(e.target.value) })}
+              className="rounded border border-[#c7ccd4] px-2 py-1.5">
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((ay) => <option key={ay} value={ay}>{ay} ay</option>)}
+            </select>
+            <button disabled={sureKaydediliyor} className="rounded bg-slate-700 px-3 py-1.5 text-white disabled:opacity-50">
+              {sureKaydediliyor ? "…" : "Süreyi kaydet"}
+            </button>
+          </div>
+          <div className="mt-1.5 text-[11px] text-gray-500">Bitiş: {kart.sure?.bitis || "—"}</div>
+        </form>
+      ) : (
+        <div className="border-b bg-white px-4 py-3 text-[12px]">
+          {anlasmali
+            ? <>Anlaşmalı müşteri süresi otomatik <strong>12 ay</strong> olarak uygulanır. Bitiş: {kart.sure?.bitis || "başlangıç tarihi yok"}</>
+            : "Süre tanımlamak için Vega özel kodunda müşteri türü YENİ MÜŞTERİ olmalıdır."}
         </div>
-        <div className="mt-1.5 text-[11px] text-gray-500">Bitiş: {kart.sure?.bitis || "—"}</div>
-      </form>
+      )}
 
       <form onSubmit={islemEkle} className="border-b bg-blue-50 px-4 py-3">
         <div className="mb-2 text-[13px] font-semibold">İşlem kaydı</div>
@@ -137,6 +202,13 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
           </button>
         </div>
         {hata && <div className="mt-2 text-[12px] text-red-700">{hata}</div>}
+        {waBildirim && (
+          <div className={`mt-2 flex items-center gap-2 rounded px-2 py-1.5 text-[11px] ${waBildirim.gonderildi ? "bg-emerald-50 text-emerald-800" : waBildirim.sirada ? "bg-blue-50 text-blue-800" : "bg-red-50 text-red-800"}`}>
+            <span>{waBildirim.mesaj}</span>
+            {!waBildirim.gonderildi && !waBildirim.iptal && !waBildirim.sirada && <button type="button" onClick={whatsappTekrarGonder} disabled={waIslemde}
+              className="ml-auto shrink-0 rounded border border-current px-2 py-0.5 disabled:opacity-40">Tekrar gönder</button>}
+          </div>
+        )}
       </form>
 
       <div className="border-b bg-[#eef1f5] px-3 py-2 text-[12px] font-semibold">Bitmiş işlemler ({ticketlar.length})</div>
