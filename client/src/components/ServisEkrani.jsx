@@ -86,18 +86,16 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
           SERINO: c.seriNo, ARIZA: c.ariza, AKSESUAR: c.aksesuar,
         })),
       }),
-      "Servis kaydı açıldı."
+      null
     );
     if (!r) return;
     setYeni(null);
     await listeYukle();
     setSeciliId(r.kayit.ID);
-    // Kabul biter bitmez cihazın üstüne etiket gitmeli; ayrı adım unutuluyor.
-    // Yazıcı seçilmemişse Windows varsayılanına gider.
-    if (etiketAyar) {
-      await calistir(() => api.etiketBas({ servisId: r.kayit.ID }), "Servis kaydı açıldı ve etiketler basıldı.");
-      await listeYukle();
-    }
+    // Etiket kendiliğinden basılmaz: her kayıtta kâğıt harcanmasın diye
+    // baskıyı kullanıcı başlatır. Kayıt açılınca sağdaki detay paneli seçili
+    // gelir, etiket düğmeleri orada.
+    setMesaj(`${r.kayit.SERVISNO} açıldı. Etiket için sağdaki “Etiket bas” düğmesini kullanın.`);
   }
 
   const durumDegistir = (kayit, durum) =>
@@ -275,16 +273,16 @@ function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, mesgul, onKayd
             ))}
           </div>
           <p className="mt-2 text-[11px] text-gray-500">
-            Servis numarası kayıt açılınca oluşur. Kayıttan sonra etiketler{" "}
-            {etiketAyar?.yazici ? `“${etiketAyar.yazici}”` : "Windows varsayılan"} yazıcısına
-            otomatik gönderilir.
+            Servis numarası kayıt açılınca oluşur. Etiket kendiliğinden basılmaz; kayıttan sonra
+            açılan detayda cihaz başına veya toptan bastırırsınız. Baskı{" "}
+            {etiketAyar?.yazici ? `“${etiketAyar.yazici}”` : "Windows varsayılan"} yazıcısına gider.
           </p>
         </div>
 
         <div className="flex gap-2">
           <button onClick={onKaydet} disabled={mesgul || !yeni.cari}
             className="rounded bg-emerald-600 px-5 py-2 font-semibold text-white disabled:opacity-40">
-            {mesgul ? "Kaydediliyor…" : "Kaydet ve etiket bas"}
+            {mesgul ? "Kaydediliyor…" : "Kaydet"}
           </button>
           <button onClick={onVazgec} disabled={mesgul}
             className="rounded border border-[#c7ccd4] bg-white px-5 py-2 disabled:opacity-40">Vazgeç</button>
