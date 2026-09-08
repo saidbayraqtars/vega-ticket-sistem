@@ -6,7 +6,13 @@ const vega = require("../lib/vega");
 const cariCache = require("../lib/cariCache");
 const whatsapp = require("../lib/whatsapp");
 const worker = require("../lib/whatsappWorker");
-const { bildirimGonder, mesajDurumu } = require("../lib/whatsappBildirim");
+const {
+  VARSAYILAN_MESAJ_SABLONU,
+  MESAJ_DEGISKENLERI,
+  mesajSablonuDogrula,
+  bildirimGonder,
+  mesajDurumu,
+} = require("../lib/whatsappBildirim");
 
 const router = express.Router();
 
@@ -19,6 +25,51 @@ router.get("/durum", async (req, res, next) => {
       qrGorsel: durum.qr ? await QRCode.toDataURL(durum.qr, { margin: 2, width: 240 }) : null,
       qr: undefined,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/sablon", async (req, res, next) => {
+  try {
+    const r = await db.ticket().request().query(`
+      SELECT WHATSAPPSABLONU, GUNCELLEYEN, GUNCELLEMETARIHI
+      FROM dbo.WHATSAPPMESAJAYARLARI WHERE ID = 1
+    `);
+    const ayar = r.recordset[0];
+    res.json({
+      ok: true,
+      sablon: ayar?.WHATSAPPSABLONU || VARSAYILAN_MESAJ_SABLONU,
+      degiskenler: MESAJ_DEGISKENLERI,
+      guncelleyen: ayar?.GUNCELLEYEN || null,
+      guncellemeTarihi: ayar?.GUNCELLEMETARIHI || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/sablon", async (req, res, next) => {
+  try {
+    const sablon = mesajSablonuDogrula(req.body?.sablon);
+    if (!sablon) {
+      return res.status(400).json({
+        ok: false,
+        mesaj: "Mesaj şablonu 1-1000 karakter olmalı ve yalnız listelenen değişkenleri kullanmalı.",
+      });
+    }
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+    await db.ticket().request()
+      .input("sablon", sql.NVarChar(1000), sablon)
+      .input("kullanici", sql.NVarChar(60), kullanici).query(`
+        MERGE dbo.WHATSAPPMESAJAYARLARI WITH (HOLDLOCK) AS H
+        USING (SELECT CAST(1 AS TINYINT) AS ID) AS K ON H.ID = K.ID
+        WHEN MATCHED THEN UPDATE SET
+          WHATSAPPSABLONU = @sablon, GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+        WHEN NOT MATCHED THEN INSERT (ID, WHATSAPPSABLONU, GUNCELLEYEN)
+          VALUES (1, @sablon, @kullanici);
+      `);
+    res.json({ ok: true, sablon, degiskenler: MESAJ_DEGISKENLERI });
   } catch (err) {
     next(err);
   }
@@ -77,10 +128,10 @@ router.post("/gonder", async (req, res, next) => {
       .input("id", sql.Int, ticketId)
       .input("firma", sql.NVarChar(4), firmaNo)
       .input("donem", sql.NVarChar(4), donemNo).query(`
-        SELECT TOP 1 ID, CARIIND, BASLIK, KAPANISTARIHI
+        SELECT TOP 1 ID, CARIIND, BASLIK, ACILISTARIHI, WHATSAPPMETNI
         FROM dbo.TICKETLER
         WHERE ID = @id AND FIRMANO = @firma AND DONEMNO = @donem
-          AND SILINDI = 0 AND DURUM = 'KAPALI'
+          AND SILINDI = 0 AND DURUM IN ('ONAY_BEKLIYOR','KAPALI')
       `);
     const ticket = t.recordset[0];
     if (!ticket) return res.status(404).json({ ok: false, mesaj: "İşlem kaydı bulunamadı." });
@@ -93,7 +144,8 @@ router.post("/gonder", async (req, res, next) => {
         ticketId: ticket.ID,
         firmaNo,
         donemNo,
-        kayitTarihi: ticket.KAPANISTARIHI,
+        kayitTarihi: ticket.ACILISTARIHI,
+        metin: ticket.WHATSAPPMETNI,
       })),
     };
     if (sonuc.iptal) return res.status(410).json({ ok: false, iptal: true, whatsapp: sonuc, mesaj: sonuc.mesaj });

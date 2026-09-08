@@ -1,9 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { MESAJ_DEGISKENLERI, VARSAYILAN_MESAJ_SABLONU } from "../lib/whatsappSablon";
 
 export default function WhatsAppAyarlari() {
   const [durum, setDurum] = useState(null);
   const [mesgul, setMesgul] = useState(false);
+  const [sablon, setSablon] = useState(VARSAYILAN_MESAJ_SABLONU);
+  const [degiskenler, setDegiskenler] = useState(MESAJ_DEGISKENLERI);
+  const [sablonMesaji, setSablonMesaji] = useState(null);
+  const [sablonKaydediliyor, setSablonKaydediliyor] = useState(false);
+  const sablonAlani = useRef(null);
 
   async function durumYukle() {
     try {
@@ -15,6 +21,10 @@ export default function WhatsAppAyarlari() {
 
   useEffect(() => {
     durumYukle();
+    api.whatsappSablon().then((r) => {
+      setSablon(r.sablon);
+      setDegiskenler(r.degiskenler || MESAJ_DEGISKENLERI);
+    }).catch((err) => setSablonMesaji({ hata: true, metin: err.message }));
     const timer = setInterval(durumYukle, 4000);
     return () => clearInterval(timer);
   }, []);
@@ -44,7 +54,33 @@ export default function WhatsAppAyarlari() {
     }
   }
 
+  function degiskenEkle(degisken) {
+    const alan = sablonAlani.current;
+    const bas = alan?.selectionStart ?? sablon.length;
+    const son = alan?.selectionEnd ?? bas;
+    setSablon(sablon.slice(0, bas) + degisken + sablon.slice(son));
+    requestAnimationFrame(() => {
+      alan?.focus();
+      alan?.setSelectionRange(bas + degisken.length, bas + degisken.length);
+    });
+  }
+
+  async function mesajSablonuKaydet() {
+    setSablonKaydediliyor(true);
+    setSablonMesaji(null);
+    try {
+      const r = await api.whatsappSablonKaydet(sablon);
+      setSablon(r.sablon);
+      setSablonMesaji({ hata: false, metin: "Mesaj şablonu tüm bilgisayarlar için kaydedildi." });
+    } catch (err) {
+      setSablonMesaji({ hata: true, metin: err.message });
+    } finally {
+      setSablonKaydediliyor(false);
+    }
+  }
+
   return (
+    <>
     <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
       <legend className="px-1 text-[12px] font-semibold text-gray-600">WhatsApp bağlantısı</legend>
       <div className="flex items-center gap-2">
@@ -84,5 +120,33 @@ export default function WhatsAppAyarlari() {
 
       {durum?.hata && <div className="mt-2 rounded bg-amber-50 px-3 py-2 text-[11px] text-amber-800">{durum.hata}</div>}
     </fieldset>
+    <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
+      <legend className="px-1 text-[12px] font-semibold text-gray-600">WhatsApp mesaj şablonu</legend>
+      <label className="text-[12px] text-gray-600">Ticket kaydedildiğinde müşteriye gönderilecek ortak metin</label>
+      <textarea ref={sablonAlani} value={sablon} onChange={(e) => setSablon(e.target.value)}
+        maxLength={1000} rows={5}
+        className="mt-1 w-full resize-y rounded border border-[#c7ccd4] px-3 py-2 outline-none focus:border-blue-500" />
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {degiskenler.map((degisken) => <button key={degisken} type="button" onClick={() => degiskenEkle(degisken)}
+          className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-[11px] text-blue-800 hover:bg-blue-100">
+          {degisken}
+        </button>)}
+      </div>
+      <div className="mt-2 text-[11px] leading-5 text-gray-500">
+        <strong>{"{firma}"}</strong>, <strong>{"{ad}"}</strong>, <strong>{"{unvan}"}</strong>: müşteri adı · <strong>{"{kod}"}</strong>: cari kodu ·<br />
+        <strong>{"{islem}"}</strong>: yapılan işlem · <strong>{"{ucret}"}</strong>: ücret · <strong>{"{tarih}"}</strong>: kayıt tarihi · <strong>{"{kullanici}"}</strong>: kaydeden kişi
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button type="button" onClick={() => setSablon(VARSAYILAN_MESAJ_SABLONU)}
+          className="rounded border border-[#c7ccd4] px-3 py-1.5 text-[11px]">Varsayılana dön</button>
+        <span className="text-[10px] text-gray-400">{sablon.length}/1000</span>
+        <button type="button" onClick={mesajSablonuKaydet} disabled={sablonKaydediliyor || !sablon.trim()}
+          className="ml-auto rounded bg-blue-600 px-4 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40">
+          {sablonKaydediliyor ? "Kaydediliyor…" : "Şablonu kaydet"}
+        </button>
+      </div>
+      {sablonMesaji && <div className={`mt-2 rounded px-3 py-2 text-[11px] ${sablonMesaji.hata ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-800"}`}>{sablonMesaji.metin}</div>}
+    </fieldset>
+    </>
   );
 }

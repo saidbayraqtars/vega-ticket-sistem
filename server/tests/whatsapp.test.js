@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { normalizeTelefon, cariTelefonu } = require("../lib/telefon");
-const { MESAJ_PENCERESI_DAKIKA, SURESI_DOLDU, SURE_HATASI, mesajOlustur, mesajPenceresiAcik, bildirimGonder, disaAktar } = require("../lib/whatsappBildirim");
+const { MESAJ_PENCERESI_DAKIKA, SURESI_DOLDU, SURE_HATASI, mesajOlustur, mesajMetniCevir, mesajSablonuDogrula, mesajSablonuDoldur, mesajPenceresiAcik, bildirimGonder, disaAktar } = require("../lib/whatsappBildirim");
 const whatsappWorker = require("../lib/whatsappWorker");
 
 test("Türkiye cep telefonları WhatsApp biçimine çevrilir", () => {
@@ -21,6 +21,21 @@ test("WhatsApp metni yapılan işlemi ve uzak bağlantı bilgisini içerir", () 
   assert.match(mesaj, /Yazıcı kurulumu/);
   assert.match(mesaj, /uzak bağlantı/);
   assert.match(mesaj, /çözülmüştür/);
+});
+
+test("Düzenlenen WhatsApp taslağı aynen kullanılır ve uzun metin reddedilir", () => {
+  assert.equal(mesajMetniCevir("  Özel mesaj  ", "İşlem"), "Özel mesaj");
+  assert.equal(mesajMetniCevir("", "Yazıcı kurulumu"), mesajOlustur("Yazıcı kurulumu"));
+  assert.equal(mesajMetniCevir("x".repeat(1001), "İşlem"), null);
+});
+
+test("WhatsApp şablonu desteklenen değişkenleri gerçek işlem bilgileriyle doldurur", () => {
+  const mesaj = mesajSablonuDoldur("Sayın {firma}, {kod}: {islem} / {ucret} TL / {kullanici}", {
+    musteri: "Örnek Ltd.", cariKodu: "C-12", islem: "Kurulum", ucret: 1250.5, kullanici: "Said",
+  });
+  assert.equal(mesaj, "Sayın Örnek Ltd., C-12: Kurulum / 1.250,50 TL / Said");
+  assert.equal(mesajSablonuDogrula("Bilinmeyen {telefon}"), null);
+  assert.equal(mesajSablonuDogrula("Merhaba {firma}"), "Merhaba {firma}");
 });
 
 test("WhatsApp yalnız ticketın ilk 30 dakikasında gönderilebilir", () => {

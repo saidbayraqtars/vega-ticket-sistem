@@ -4,6 +4,7 @@ import Arama from "../components/Arama";
 import CariIzgara from "../components/CariIzgara";
 import CariDetay from "../components/CariDetay";
 import TicketIzgara from "../components/TicketIzgara";
+import OnayBekleyenler from "../components/OnayBekleyenler";
 import ServisEkrani from "../components/ServisEkrani";
 
 const SAYFA = 300;
@@ -65,6 +66,7 @@ export default function Panel({ firmaNo, donemNo, onAyarlar }) {
         <Arama firmaNo={firmaNo} donemNo={donemNo} onSec={aramadanSec} />
         <div className="mt-3 flex gap-2">
           <Sekme aktif={gorunum === "musteriler"} onClick={() => setGorunum("musteriler")}>Müşteriler</Sekme>
+          <Sekme aktif={gorunum === "onay"} onClick={() => setGorunum("onay")}>Onay bekleyenler</Sekme>
           <Sekme aktif={gorunum === "ticketlar"} onClick={() => setGorunum("ticketlar")}>Tamamlanan işlemler</Sekme>
           <Sekme aktif={gorunum === "servis"} onClick={() => setGorunum("servis")}>Servis kabul</Sekme>
         </div>
@@ -72,6 +74,9 @@ export default function Panel({ firmaNo, donemNo, onAyarlar }) {
 
       {gorunum === "ticketlar" ? (
         <div className="min-h-0 flex-1"><TicketIzgara firmaNo={firmaNo} tetik={ticketTetik} /></div>
+      ) : gorunum === "onay" ? (
+        <div className="min-h-0 flex-1"><OnayBekleyenler firmaNo={firmaNo} tetik={ticketTetik}
+          onOnaylandi={() => setTicketTetik((x) => x + 1)} /></div>
       ) : gorunum === "servis" ? (
         <div className="min-h-0 flex-1"><ServisEkrani firmaNo={firmaNo} donemNo={donemNo} /></div>
       ) : (

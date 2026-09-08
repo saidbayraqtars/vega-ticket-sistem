@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ucretCevir, tarihCevir, rvCevir } = require("../lib/ticketKurallari");
+const { ucretCevir, tarihCevir, rvCevir, ayCevir } = require("../lib/ticketKurallari");
 
 test("Ücret Türkçe ve noktalı ondalık biçimlerden çevrilir", () => {
   assert.equal(ucretCevir("1.500,50"), 1500.5);
@@ -31,4 +31,11 @@ test("ROWVERSION tam 8 bayt hex olmalıdır", () => {
   assert.equal(rvCevir("00000000000000ff").length, 8);
   assert.equal(rvCevir("ff"), null);
   assert.equal(rvCevir("zzzzzzzzzzzzzzzz"), null);
+});
+
+test("Aylık filtre yalnız YYYY-MM biçimini ve gerçek ayları kabul eder", () => {
+  assert.equal(ayCevir("2026-09"), "2026-09");
+  assert.equal(ayCevir("2026-00"), null);
+  assert.equal(ayCevir("2026-13"), null);
+  assert.equal(ayCevir("09.2026"), null);
 });

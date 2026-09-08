@@ -11,9 +11,14 @@ const SUTUNLAR = [
 ];
 const YOKLAMA_MS = 4000;
 const sirala = (rows) => [...rows].sort((a, b) => new Date(b.KAPANISTARIHI) - new Date(a.KAPANISTARIHI) || b.ID - a.ID);
+const ayAnahtari = (d = new Date()) => {
+  const tarih = d instanceof Date ? d : new Date(d);
+  return `${tarih.getFullYear()}-${String(tarih.getMonth() + 1).padStart(2, "0")}`;
+};
 
 export default function TicketIzgara({ firmaNo, tetik }) {
   const [kayitlar, setKayitlar] = useState([]);
+  const [ay, setAy] = useState(() => ayAnahtari());
   const [duzenlenen, setDuzenlenen] = useState(null);
   const [taslak, setTaslak] = useState("");
   const [uyari, setUyari] = useState(null);
@@ -22,10 +27,10 @@ export default function TicketIzgara({ firmaNo, tetik }) {
   const sonRv = useRef(null);
 
   const ilkYukle = useCallback(async () => {
-    const r = await api.ticketListe({ firma: firmaNo });
+    const r = await api.ticketListe({ firma: firmaNo, durum: "KAPALI", ay });
     setKayitlar(r.kayitlar);
-    sonRv.current = r.kayitlar.reduce((m, k) => !m || k.RV > m ? k.RV : m, null);
-  }, [firmaNo]);
+    sonRv.current = r.sonRv || r.kayitlar.reduce((m, k) => !m || k.RV > m ? k.RV : m, null);
+  }, [firmaNo, ay]);
 
   useEffect(() => { ilkYukle().catch((e) => setUyari(e.message)); }, [ilkYukle, tetik]);
   useEffect(() => {
@@ -37,13 +42,17 @@ export default function TicketIzgara({ firmaNo, tetik }) {
         sonRv.current = r.sonRv;
         setKayitlar((onceki) => {
           const harita = new Map(onceki.map((k) => [k.ID, k]));
-          for (const k of r.kayitlar) k.SILINDI ? harita.delete(k.ID) : harita.set(k.ID, k);
+          for (const k of r.kayitlar) {
+            const buAyda = k.KAPANISTARIHI && ayAnahtari(k.KAPANISTARIHI) === ay;
+            if (k.SILINDI || k.DURUM !== "KAPALI" || !buAyda) harita.delete(k.ID);
+            else harita.set(k.ID, k);
+          }
           return sirala([...harita.values()]);
         });
       } catch { /* sonraki yoklamada yeniden denenir */ }
     }, YOKLAMA_MS);
     return () => clearInterval(zamanlayici);
-  }, [firmaNo, duzenlenen]);
+  }, [firmaNo, ay, duzenlenen]);
 
   function duzenle(kayit, sutun) {
     if (sutun.salt) return;
@@ -84,6 +93,11 @@ export default function TicketIzgara({ firmaNo, tetik }) {
       <div className="flex items-center border-b bg-white px-4 py-2">
         <span className="font-semibold">Tamamlanan işlemler</span>
         <span className="ml-2 text-[12px] text-gray-500">{kayitlar.length} kayıt</span>
+        <label className="ml-auto flex items-center gap-2 text-[12px] text-gray-600">
+          Ay
+          <input type="month" value={ay} onChange={(e) => setAy(e.target.value || ayAnahtari())}
+            className="rounded border border-[#c7ccd4] bg-white px-2 py-1" />
+        </label>
       </div>
       {uyari && <div className="flex border-b border-red-200 bg-red-50 px-3 py-1.5 text-red-700"><span className="flex-1">{uyari}</span><button onClick={() => setUyari(null)}>×</button></div>}
       <div className="min-h-0 flex-1 overflow-auto bg-white">

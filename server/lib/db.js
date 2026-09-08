@@ -56,7 +56,7 @@ const TICKET_SEMA = [
      CARIADI          NVARCHAR(255) NULL,
      BASLIK           NVARCHAR(200) NOT NULL,
      ACIKLAMA         NVARCHAR(MAX) NULL,
-     DURUM            NVARCHAR(20)  NOT NULL DEFAULT 'ACIK',
+     DURUM            NVARCHAR(20)  NOT NULL DEFAULT 'ONAY_BEKLIYOR',
      ONCELIK          NVARCHAR(20)  NOT NULL DEFAULT 'NORMAL',
      KATEGORI         NVARCHAR(50)  NULL,
      ATANAN           NVARCHAR(60)  NULL,
@@ -109,6 +109,23 @@ const TICKET_SEMA = [
   // değişirse geçmiş ticketın neden ücretli/ücretsiz olduğu kaybolmasın.
   `IF COL_LENGTH('dbo.TICKETLER','SOZLESMEDURUMU') IS NULL
    ALTER TABLE dbo.TICKETLER ADD SOZLESMEDURUMU NVARCHAR(20) NULL`,
+
+  // --- İşlem onayı ve gönderilecek WhatsApp taslağı -------------------
+  // Yeni kayıt patron takibi için onay kuyruğuna düşer; WhatsApp ise kayıt
+  // anında gönderilir. Taslağı ticketta saklamak tekrar gönderimi güvenli kılar.
+  `IF COL_LENGTH('dbo.TICKETLER','WHATSAPPMETNI') IS NULL
+   ALTER TABLE dbo.TICKETLER ADD WHATSAPPMETNI NVARCHAR(1000) NULL`,
+
+  `IF COL_LENGTH('dbo.TICKETLER','ONAYLAYAN') IS NULL
+   ALTER TABLE dbo.TICKETLER ADD ONAYLAYAN NVARCHAR(60) NULL`,
+
+  `IF COL_LENGTH('dbo.TICKETLER','ONAYTARIHI') IS NULL
+   ALTER TABLE dbo.TICKETLER ADD ONAYTARIHI DATETIME NULL`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_TICKETLER_ONAYLI_AY')
+   CREATE INDEX IX_TICKETLER_ONAYLI_AY
+     ON dbo.TICKETLER (FIRMANO, SILINDI, DURUM, KAPANISTARIHI DESC)
+     INCLUDE (CARIIND, CARIADI, BASLIK, UCRET)`,
 
   `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_TICKETLER_UCRET')
    CREATE INDEX IX_TICKETLER_UCRET ON dbo.TICKETLER (SILINDI, UCRETDURUMU)
@@ -178,9 +195,20 @@ const TICKET_SEMA = [
      ON dbo.WHATSAPPMESAJLARI (DURUM, KAYITTARIHI, ID)
      INCLUDE (TICKETID, FIRMANO, DONEMNO, CARIIND, TELEFON)`,
 
+  // Tüm istemcilerin kullandığı ortak, değişkenli gönderim şablonu.
+  `IF OBJECT_ID('dbo.WHATSAPPMESAJAYARLARI','U') IS NULL
+   CREATE TABLE dbo.WHATSAPPMESAJAYARLARI (
+     ID                TINYINT        NOT NULL PRIMARY KEY,
+     WHATSAPPSABLONU   NVARCHAR(1000) NOT NULL,
+     GUNCELLEYEN       NVARCHAR(60)   NULL,
+     GUNCELLEMETARIHI  DATETIME       NOT NULL DEFAULT GETDATE(),
+     RV                ROWVERSION,
+     CONSTRAINT CK_WHATSAPPMESAJAYARLARI_TEK CHECK (ID = 1)
+   )`,
+
   // --- Servis kabulü (v1.3) ---------------------------------------------
-  // Müşteri cihazıyla geldiğinde açılan kabul kaydı. TICKETLER "bitmiş işlem"
-  // arşivi olarak kalır; açık servis akışı buraya yazılır, ikisi karışmaz.
+  // Müşteri cihazıyla geldiğinde açılan kabul kaydı. TICKETLER uzaktan yapılan
+  // işlerin onay/tamamlanma takibidir; açık servis akışı burada tutulur.
   // SERVISNO etikete basılan görünen numaradır; IDENTITY'den türetildiği için
   // ayrı sayaç ve yarış koşulu yok.
   `IF OBJECT_ID('dbo.SERVISKAYITLARI','U') IS NULL

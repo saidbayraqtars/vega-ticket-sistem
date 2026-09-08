@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, kullaniciAl } from "../api/client";
+import { mesajOnizle, VARSAYILAN_MESAJ_SABLONU } from "../lib/whatsappSablon";
 
 const tl = (n) => Number(n ?? 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const tarih = (d) => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
@@ -8,16 +9,18 @@ const bugunYerel = () => {
   const iki = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${iki(d.getMonth() + 1)}-${iki(d.getDate())}`;
 };
+const bosIslemFormu = { baslik: "", ucret: "", whatsappSablonu: VARSAYILAN_MESAJ_SABLONU };
 
 export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, onMusteriDegisti }) {
   const [veri, setVeri] = useState(null);
   const [hata, setHata] = useState(null);
-  const [form, setForm] = useState({ baslik: "", ucret: "" });
+  const [form, setForm] = useState(bosIslemFormu);
   const [sureForm, setSureForm] = useState({ baslangic: bugunYerel(), sureAy: 1 });
   const [kaydediliyor, setKaydediliyor] = useState(false);
   const [sureKaydediliyor, setSureKaydediliyor] = useState(false);
   const [waBildirim, setWaBildirim] = useState(null);
   const [waIslemde, setWaIslemde] = useState(false);
+  const [waSablon, setWaSablon] = useState(VARSAYILAN_MESAJ_SABLONU);
 
   async function detayYukle(ind = cariInd) {
     const r = await api.cariDetay(ind, { firma: firmaNo, donem: donemNo });
@@ -28,11 +31,21 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
   }
 
   useEffect(() => {
+    api.whatsappSablon().then((r) => {
+      setWaSablon(r.sablon);
+      setForm((onceki) => ({
+        ...onceki,
+        whatsappSablonu: onceki.whatsappSablonu === VARSAYILAN_MESAJ_SABLONU ? r.sablon : onceki.whatsappSablonu,
+      }));
+    }).catch(() => { /* varsayılan şablonla devam edilir */ });
+  }, []);
+
+  useEffect(() => {
     if (!cariInd) { setVeri(null); return; }
     let iptal = false;
     setVeri(null);
     setHata(null);
-    setForm({ baslik: "", ucret: "" });
+    setForm({ ...bosIslemFormu, whatsappSablonu: waSablon });
     setWaBildirim(null);
     api.cariDetay(cariInd, { firma: firmaNo, donem: donemNo })
       .then((r) => {
@@ -73,9 +86,10 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
         CARIIND: veri.kart.IND,
         BASLIK: islem,
         UCRET: form.ucret,
+        WHATSAPPSABLONU: form.whatsappSablonu,
       });
       setWaBildirim(r.whatsapp);
-      setForm({ baslik: "", ucret: "" });
+      setForm({ ...bosIslemFormu, whatsappSablonu: waSablon });
       await detayYukle();
       onTicketDegisti?.();
     } catch (err) {
@@ -192,21 +206,44 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
           onChange={(e) => setForm({ ...form, baslik: e.target.value })}
           placeholder="Yapılan işlem"
           className="w-full resize-none rounded border border-[#c7ccd4] bg-white px-3 py-2 outline-none focus:border-blue-500" />
+        <div className="mt-2 flex items-center">
+          <label className="text-[12px] font-semibold text-gray-700">WhatsApp mesaj şablonu</label>
+          <button type="button" onClick={() => setForm({ ...form, whatsappSablonu: waSablon })}
+            className="ml-auto text-[11px] text-blue-700 hover:underline">Ayarlardaki şablonu yükle</button>
+        </div>
+        <textarea required maxLength={1000} rows={3} value={form.whatsappSablonu}
+          onChange={(e) => setForm({ ...form, whatsappSablonu: e.target.value })}
+          placeholder="Ayarlar'daki değişkenli şablon"
+          className="mt-1 w-full resize-none rounded border border-[#c7ccd4] bg-white px-3 py-2 outline-none focus:border-blue-500" />
+        <div className="mt-1 flex text-[10px] text-gray-500">
+          <span>Durum: Kaydet dediğiniz anda WhatsApp kuyruğuna alınır; patron onayı beklenmez.</span>
+          <span className="ml-auto">{form.whatsappSablonu.length}/1000</span>
+        </div>
+        <div className="mt-1 rounded border border-blue-100 bg-white px-2 py-1.5 text-[11px] text-gray-700">
+          <span className="font-semibold text-blue-800">Gönderilecek mesaj: </span>
+          {mesajOnizle(form.whatsappSablonu, {
+            musteri: veri.kart.AD, cariKodu: veri.kart.FIRMAKODU, islem: form.baslik,
+            ucret: form.ucret, kullanici: kullaniciAl(),
+          })}
+        </div>
         <div className="mt-2 flex gap-2">
           <input inputMode="decimal" value={form.ucret}
             onChange={(e) => setForm({ ...form, ucret: e.target.value })}
             placeholder="Söylenen ücret ₺"
             className="min-w-0 flex-1 rounded border border-[#c7ccd4] bg-white px-3 py-2 text-right outline-none focus:border-blue-500" />
-          <button disabled={kaydediliyor || !form.baslik.trim()} className="rounded bg-blue-600 px-5 py-2 font-semibold text-white disabled:opacity-40">
+          <button disabled={kaydediliyor || !form.baslik.trim() || !form.whatsappSablonu.trim()} className="rounded bg-blue-600 px-5 py-2 font-semibold text-white disabled:opacity-40">
             {kaydediliyor ? "Kaydediliyor…" : "Kaydet"}
           </button>
         </div>
         {hata && <div className="mt-2 text-[12px] text-red-700">{hata}</div>}
         {waBildirim && (
-          <div className={`mt-2 flex items-center gap-2 rounded px-2 py-1.5 text-[11px] ${waBildirim.gonderildi ? "bg-emerald-50 text-emerald-800" : waBildirim.sirada ? "bg-blue-50 text-blue-800" : "bg-red-50 text-red-800"}`}>
-            <span>{waBildirim.mesaj}</span>
+          <div className={`mt-2 rounded px-2 py-1.5 text-[11px] ${waBildirim.gonderildi ? "bg-emerald-50 text-emerald-800" : waBildirim.sirada ? "bg-blue-50 text-blue-800" : "bg-red-50 text-red-800"}`}>
+            <div className="flex items-center gap-2">
+              <span>{waBildirim.mesaj}</span>
             {!waBildirim.gonderildi && !waBildirim.iptal && !waBildirim.sirada && <button type="button" onClick={whatsappTekrarGonder} disabled={waIslemde}
               className="ml-auto shrink-0 rounded border border-current px-2 py-0.5 disabled:opacity-40">Tekrar gönder</button>}
+            </div>
+            {waBildirim.metin && <div className="mt-1 border-t border-current/15 pt-1 opacity-80">Mesaj: {waBildirim.metin}</div>}
           </div>
         )}
       </form>

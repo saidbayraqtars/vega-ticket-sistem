@@ -10,23 +10,24 @@ Durum: **üretim paketi hazır**
 
 - Şirket içindeki müşteri aramalarında yapılan işlem ve söylenen ücret kaydedilir.
 - Açık/kapalı yönetimi, öncelik, kategori, atama, tahsilat ve otomatik fatura yoktur.
-- Yeni işlem veritabanına doğrudan tamamlanmış ve kapanış tarihli yazılır.
-- İşlem geçmişinde yalnız tamamlanan kayıtlar gösterilir.
+- Yeni işlem `ONAY_BEKLIYOR` durumuyla patronun takip listesine yazılır; çift tıklanınca tamamlanır.
+- Tamamlanan işlemler varsayılan olarak yalnız geçerli ayı, seçim yapılırsa ilgili geçmiş ayı gösterir.
 - Müşteri listesi Excel görünümündedir; büyük arama alanı ve dönemsel borç durumu içerir.
 - Cari seçildiğinde anlaşmalı/yeni müşteri durumu özel koddan türetilip belirgin gösterilir.
 - Anlaşmalı yazım türevleri otomatik 12 aya düşer; yalnız yeni müşteriye 1–12 ay özel süre verilir.
-- İşlem kaydından sonra GSM öncelikli numaraya QR bağlantılı WhatsApp bildirimi gönderilir; başarısız gönderim aynı ticketı çoğaltmadan yeniden denenebilir.
+- Ayarlar'da ortak tutulan değişkenli mesaj şablonu işlem ekranında gerçek müşteri/işlem verisiyle önizlenir ve kayıt anında, patron onayı beklenmeden GSM öncelikli numaraya gönderilir; başarısız gönderim aynı ticketı çoğaltmadan yeniden denenebilir.
 - WhatsApp oturumu yalnız ortak ayarda seçilen ana bilgisayarın kullanıcı profilindedir. İstemciler mesajı `VEGATICKETDB.dbo.WHATSAPPMESAJLARI` kuyruğuna bırakır; ayrı QR okutmaz. Tickettan sonra 30 dakika içinde gönderilemeyen mesaj SQL Server saatine göre iptal edilir.
 - WhatsApp bağlantı durumu, QR ve oturum sıfırlama yalnız Ayarlar ekranındadır; müşteri detayında yalnız işlem sonrası gönderim sonucu gösterilir.
 
 ## Veri sınırı
 
 - `VEGADBozdemirkaya`: salt-okunur müşteri kartları ve dönem hareketleri.
-- `VEGATICKETDB.dbo.TICKETLER`: tamamlanmış işlem kayıtları.
+- `VEGATICKETDB.dbo.TICKETLER`: onay bekleyen ve tamamlanmış işlem kayıtları ile WhatsApp taslağı.
 - `VEGATICKETDB.dbo.CARISURELERI`: firma/cari bazında başlangıç ve 1–12 aylık süre.
 - `VEGATICKETDB.dbo.TICKETLOG`: denetim izi.
 - `VEGATICKETDB.dbo.WHATSAPPAYARLARI`: ana bilgisayar ve ortak bağlantı durumu.
 - `VEGATICKETDB.dbo.WHATSAPPMESAJLARI`: merkezi WhatsApp gönderim kuyruğu.
+- `VEGATICKETDB.dbo.WHATSAPPMESAJAYARLARI`: ortak değişkenli WhatsApp mesaj şablonu.
 
 Eski ticket kolonları geçmiş veri uyumluluğu için korunur ancak yeni arayüzde gösterilmez ve API üzerinden değiştirilemez.
 

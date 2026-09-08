@@ -3,51 +3,84 @@ const sql = require("mssql");
 const db = require("../lib/db");
 const vega = require("../lib/vega");
 const cariCache = require("../lib/cariCache");
-const { ucretCevir, rvCevir } = require("../lib/ticketKurallari");
-const { bildirimGonder } = require("../lib/whatsappBildirim");
+const { ucretCevir, rvCevir, ayCevir } = require("../lib/ticketKurallari");
+const {
+  VARSAYILAN_MESAJ_SABLONU,
+  bildirimGonder,
+  mesajSablonuDoldur,
+} = require("../lib/whatsappBildirim");
 const whatsappWorker = require("../lib/whatsappWorker");
 
 const router = express.Router();
-const DURUMLAR = ["KAPALI"];
+const DURUMLAR = ["ONAY_BEKLIYOR", "KAPALI"];
 const ONCELIKLER = [];
 const UCRET_DURUMLARI = ["KAYIT"];
 const SUTUNLAR = `ID, FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, BASLIK,
-  KAPANISTARIHI, UCRET, OLUSTURAN, GUNCELLEYEN, GUNCELLEMETARIHI, SILINDI, RV`;
+  DURUM, ACILISTARIHI, KAPANISTARIHI, UCRET, WHATSAPPMETNI, ONAYLAYAN,
+  ONAYTARIHI, OLUSTURAN, GUNCELLEYEN, GUNCELLEMETARIHI, SILINDI, RV`;
 const rvHex = (buf) => (buf ? Buffer.from(buf).toString("hex") : null);
 const disaAktar = (r) => ({ ...r, RV: rvHex(r.RV) });
 const gecerliNo = (v) => /^\d{1,4}$/.test(String(v ?? "").trim());
 
-/** Yalnız bitmiş işlem kayıtları. */
+/** Patron onayı bekleyen veya onaylanmış işlem kayıtları. */
 router.get("/", async (req, res, next) => {
   try {
     const firmaNo = vega.pad4(req.query.firma);
     const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
-    const kosullar = ["SILINDI = 0", "DURUM = 'KAPALI'", "FIRMANO = @firma"];
-    const istek = db.ticket().request().input("firma", sql.NVarChar(4), firmaNo);
+    const durum = String(req.query.durum || "KAPALI").trim().toUpperCase();
+    if (!DURUMLAR.includes(durum)) {
+      return res.status(400).json({ ok: false, mesaj: "Geçersiz işlem durumu." });
+    }
+    const kosullar = ["SILINDI = 0", "DURUM = @durum", "FIRMANO = @firma"];
+    const istek = db.ticket().request()
+      .input("firma", sql.NVarChar(4), firmaNo)
+      .input("durum", sql.NVarChar(20), durum);
+    if (durum === "KAPALI") {
+      const ay = req.query.ay ? ayCevir(req.query.ay) : null;
+      if (req.query.ay && !ay) {
+        return res.status(400).json({ ok: false, mesaj: "Ay filtresi YYYY-AA biçiminde olmalı." });
+      }
+      if (ay) {
+        istek.input("ay", sql.NVarChar(7), ay);
+        kosullar.push("KAPANISTARIHI >= CONVERT(date, @ay + '-01', 23)");
+        kosullar.push("KAPANISTARIHI < DATEADD(MONTH, 1, CONVERT(date, @ay + '-01', 23))");
+      } else {
+        kosullar.push("KAPANISTARIHI >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)");
+        kosullar.push("KAPANISTARIHI < DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1))");
+      }
+    }
     if (req.query.cari) {
       const cari = parseInt(req.query.cari, 10);
       if (!Number.isInteger(cari)) return res.status(400).json({ ok: false, mesaj: "Geçersiz cari." });
       kosullar.push("CARIIND = @cari");
       istek.input("cari", sql.Int, cari);
     }
+    const tarihSutunu = durum === "KAPALI" ? "KAPANISTARIHI" : "ACILISTARIHI";
     const r = await istek.query(`
-      SELECT TOP ${limit} ${SUTUNLAR}
+      SELECT TOP ${limit} ${SUTUNLAR},
+        (SELECT TOP 1 W.DURUM FROM dbo.WHATSAPPMESAJLARI W WHERE W.TICKETID = dbo.TICKETLER.ID) AS WHATSAPPDURUMU,
+        (SELECT TOP 1 W.SONHATA FROM dbo.WHATSAPPMESAJLARI W WHERE W.TICKETID = dbo.TICKETLER.ID) AS WHATSAPPHATA
       FROM dbo.TICKETLER
       WHERE ${kosullar.join(" AND ")}
-      ORDER BY KAPANISTARIHI DESC, ID DESC
+      ORDER BY ${tarihSutunu} DESC, ID DESC;
+      SELECT @@DBTS AS SONRV;
     `);
-    res.json({ ok: true, kayitlar: r.recordset.map(disaAktar) });
+    res.json({
+      ok: true,
+      kayitlar: r.recordsets[0].map(disaAktar),
+      sonRv: rvHex(r.recordsets[1]?.[0]?.SONRV),
+    });
   } catch (err) {
     next(err);
   }
 });
 
-/** Çok kullanıcılı ekranda yalnız bitmiş/silinmiş kayıt değişiklikleri. */
+/** Çok kullanıcılı onay ekranlarında iki durum arasındaki tüm geçişler. */
 router.get("/degisiklikler", async (req, res, next) => {
   try {
     const firmaNo = vega.pad4(req.query.firma);
     const istek = db.ticket().request().input("firma", sql.NVarChar(4), firmaNo);
-    let kosul = "FIRMANO = @firma AND (DURUM = 'KAPALI' OR SILINDI = 1)";
+    let kosul = "FIRMANO = @firma AND (DURUM IN ('ONAY_BEKLIYOR','KAPALI') OR SILINDI = 1)";
     if (req.query.sonRv) {
       const rv = rvCevir(req.query.sonRv);
       if (!rv) return res.status(400).json({ ok: false, mesaj: "Geçersiz ROWVERSION." });
@@ -66,7 +99,7 @@ router.get("/degisiklikler", async (req, res, next) => {
   }
 });
 
-/** İşlem eklenince doğrudan tamamlanmış kayıt olur; fatura veya tahsilat üretmez. */
+/** İşlem patron onayına düşer; WhatsApp bildirimi kayıt anında kuyruğa alınır. */
 router.post("/", async (req, res, next) => {
   try {
     const b = req.body || {};
@@ -89,6 +122,27 @@ router.post("/", async (req, res, next) => {
     const kart = rows.find((x) => x.IND === cariInd);
     if (!kart) return res.status(404).json({ ok: false, mesaj: "Cari bulunamadı." });
     const kullanici = String(req.kullanici || b.OLUSTURAN || "").trim() || "bilinmiyor";
+    let whatsappSablonu = b.WHATSAPPSABLONU ?? b.WHATSAPPMETNI;
+    if (!whatsappSablonu) {
+      const ayar = await db.ticket().request().query(`
+        SELECT WHATSAPPSABLONU FROM dbo.WHATSAPPMESAJAYARLARI WHERE ID = 1
+      `);
+      whatsappSablonu = ayar.recordset[0]?.WHATSAPPSABLONU || VARSAYILAN_MESAJ_SABLONU;
+    }
+    const whatsappMetni = mesajSablonuDoldur(whatsappSablonu, {
+      musteri: kart.AD,
+      cariKodu: kart.FIRMAKODU,
+      islem: baslik,
+      ucret,
+      tarih: new Date(),
+      kullanici,
+    });
+    if (!whatsappMetni) {
+      return res.status(400).json({
+        ok: false,
+        mesaj: "WhatsApp şablonu 1-1000 karakter olmalı ve yalnız Ayarlar'da listelenen değişkenleri kullanmalı.",
+      });
+    }
 
     const r = await db.ticket().request()
       .input("firma", sql.NVarChar(4), firmaNo)
@@ -97,19 +151,20 @@ router.post("/", async (req, res, next) => {
       .input("carikodu", sql.NVarChar(50), kart.FIRMAKODU ?? null)
       .input("cariadi", sql.NVarChar(255), kart.AD ?? null)
       .input("baslik", sql.NVarChar(200), baslik)
+      .input("whatsapp", sql.NVarChar(1000), whatsappMetni)
       .input("ucret", sql.Decimal(18, 2), ucret)
       .input("olusturan", sql.NVarChar(60), kullanici).query(`
         INSERT INTO dbo.TICKETLER
           (FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, BASLIK,
-           DURUM, ONCELIK, KAPANISTARIHI, OLUSTURAN,
+           DURUM, ONCELIK, KAPANISTARIHI, OLUSTURAN, WHATSAPPMETNI,
            UCRET, UCRETDURUMU, SOZLESMEDURUMU)
         OUTPUT ${SUTUNLAR.split(",").map((s) => "INSERTED." + s.trim()).join(", ")}
         VALUES (@firma, @donem, @cari, @carikodu, @cariadi, @baslik,
-                'KAPALI', 'NORMAL', GETDATE(), @olusturan,
+                'ONAY_BEKLIYOR', 'NORMAL', NULL, @olusturan, @whatsapp,
                 @ucret, 'KAYIT', NULL)
       `);
     const kayit = disaAktar(r.recordset[0]);
-    await logYaz(kayit.ID, kullanici, null, null, null, "Tamamlanan işlem kaydedildi.");
+    await logYaz(kayit.ID, kullanici, null, null, null, "İşlem onay bekleyenlere kaydedildi.");
     // Ticket kalıcı yazıldıktan sonra ortak WhatsApp kuyruğuna alınır. Yalnız
     // seçili ana bilgisayar gönderir; kuyruk sorunu ticket kaydını geri almaz.
     let whatsapp;
@@ -118,7 +173,8 @@ router.post("/", async (req, res, next) => {
         ticketId: kayit.ID,
         firmaNo,
         donemNo,
-        kayitTarihi: kayit.KAPANISTARIHI,
+        kayitTarihi: kayit.ACILISTARIHI,
+        metin: whatsappMetni,
       });
       // Bu makine ana makineyse bekleme moduna düşmüş döngüyü hemen uyandır;
       // değilse zararsız, döngü kontrol edip geri döner.
@@ -133,6 +189,7 @@ router.post("/", async (req, res, next) => {
         gonderildi: false,
         sirada: false,
         iptal: false,
+        metin: whatsappMetni,
         mesaj: "İşlem kaydedildi; WhatsApp kuyruğuna alınamadı. Tekrar gönderebilirsiniz.",
       };
     }
@@ -142,7 +199,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-/** Geçmiş kayıtta yalnız yapılan işlem ve söylenen ücret düzenlenebilir. */
+/** Onaylanmış kayıtta yalnız yapılan işlem ve söylenen ücret düzenlenebilir. */
 router.patch("/:id", async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -183,6 +240,39 @@ router.patch("/:id", async (req, res, next) => {
       });
     }
     await logYaz(id, kullanici, null, null, null, "Tamamlanan işlem düzenlendi.");
+    res.json({ ok: true, kayit: disaAktar(r.recordset[0]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Patron takibi: çift tıklanan bekleyen işlem tamamlananlara taşınır. */
+router.post("/:id/onayla", async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ ok: false, mesaj: "Geçersiz işlem kimliği." });
+    }
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+    const r = await db.ticket().request()
+      .input("id", sql.Int, id)
+      .input("kullanici", sql.NVarChar(60), kullanici).query(`
+        UPDATE dbo.TICKETLER SET
+          DURUM = 'KAPALI', KAPANISTARIHI = GETDATE(),
+          ONAYLAYAN = @kullanici, ONAYTARIHI = GETDATE(),
+          GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+        OUTPUT ${SUTUNLAR.split(",").map((s) => "INSERTED." + s.trim()).join(", ")}
+        WHERE ID = @id AND SILINDI = 0 AND DURUM = 'ONAY_BEKLIYOR'
+      `);
+    if (!r.recordset.length) {
+      const mevcut = await db.ticket().request().input("id", sql.Int, id)
+        .query("SELECT DURUM, SILINDI FROM dbo.TICKETLER WHERE ID = @id");
+      if (!mevcut.recordset.length || mevcut.recordset[0].SILINDI) {
+        return res.status(404).json({ ok: false, mesaj: "Onaylanacak işlem bulunamadı." });
+      }
+      return res.status(409).json({ ok: false, mesaj: "Bu işlem başka bir kullanıcı tarafından zaten onaylandı." });
+    }
+    await logYaz(id, kullanici, "DURUM", "ONAY_BEKLIYOR", "KAPALI", "İşlem çift tıklamayla tamamlandı.");
     res.json({ ok: true, kayit: disaAktar(r.recordset[0]) });
   } catch (err) {
     next(err);

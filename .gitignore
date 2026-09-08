@@ -13,3 +13,6 @@ server/whatsapp-auth/
 .claude/
 Thumbs.db
 .DS_Store
+
+# AI devir notlari (sunucu/erisim bilgisi icerir)
+AI-DEVIR-NOTLARI.md

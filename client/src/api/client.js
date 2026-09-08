@@ -66,6 +66,7 @@ export const api = {
   ticketOzet: (p) => istek("/api/ticket/ozet" + qs(p)),
   ticketDegisiklikler: (p) => istek("/api/ticket/degisiklikler" + qs(p)),
   ticketOlustur: (t) => istek("/api/ticket", { method: "POST", body: JSON.stringify(t) }),
+  ticketOnayla: (id) => istek(`/api/ticket/${id}/onayla`, { method: "POST" }),
   ticketGuncelle: (id, yama) => istek(`/api/ticket/${id}`, { method: "PATCH", body: JSON.stringify(yama) }),
   ticketSil: (id) => istek(`/api/ticket/${id}`, { method: "DELETE" }),
   ticketLog: (id) => istek(`/api/ticket/${id}/log`),
@@ -87,6 +88,8 @@ export const api = {
   etiketBas: (veri) => istek("/api/etiket/bas", { method: "POST", body: JSON.stringify(veri) }),
 
   whatsappDurum: () => istek("/api/whatsapp/durum"),
+  whatsappSablon: () => istek("/api/whatsapp/sablon"),
+  whatsappSablonKaydet: (sablon) => istek("/api/whatsapp/sablon", { method: "POST", body: JSON.stringify({ sablon }) }),
   whatsappSifirla: () => istek("/api/whatsapp/sifirla", { method: "POST" }),
   whatsappAnaYap: () => istek("/api/whatsapp/ana-yap", { method: "POST" }),
   whatsappMesajDurumu: (ticketId) => istek(`/api/whatsapp/mesaj/${ticketId}`),

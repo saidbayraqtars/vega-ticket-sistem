@@ -4,9 +4,42 @@ const { cariTelefonu } = require("./telefon");
 
 const MESAJ_PENCERESI_DAKIKA = 30;
 const MESAJ_PENCERESI_MS = MESAJ_PENCERESI_DAKIKA * 60 * 1000;
+const VARSAYILAN_MESAJ_SABLONU = "Merhaba, “{islem}” işlemi için uzak bağlantı ile sorununuz çözülmüştür. İyi günler dileriz.";
+const MESAJ_DEGISKENLERI = ["{firma}", "{ad}", "{unvan}", "{kod}", "{carikodu}", "{islem}", "{ucret}", "{tarih}", "{kullanici}"];
+const DEGISKEN_ADLARI = new Set(MESAJ_DEGISKENLERI.map((x) => x.slice(1, -1)));
+
+function mesajSablonuDogrula(sablon) {
+  const sonuc = String(sablon ?? "").trim();
+  if (!sonuc || sonuc.length > 1000) return null;
+  const bulunanlar = [...sonuc.matchAll(/\{([^{}]+)\}/g)].map((m) => m[1].toLocaleLowerCase("tr-TR"));
+  return bulunanlar.every((ad) => DEGISKEN_ADLARI.has(ad)) ? sonuc : null;
+}
+
+function mesajSablonuDoldur(sablon, veri = {}) {
+  const gecerli = mesajSablonuDogrula(sablon || VARSAYILAN_MESAJ_SABLONU);
+  if (!gecerli) return null;
+  const musteri = String(veri.musteri || "");
+  const degerler = {
+    firma: musteri,
+    ad: musteri,
+    unvan: musteri,
+    kod: String(veri.cariKodu || ""),
+    carikodu: String(veri.cariKodu || ""),
+    islem: String(veri.islem || ""),
+    ucret: Number(veri.ucret || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    tarih: (veri.tarih instanceof Date ? veri.tarih : new Date(veri.tarih || Date.now())).toLocaleDateString("tr-TR"),
+    kullanici: String(veri.kullanici || ""),
+  };
+  return gecerli.replace(/\{([^{}]+)\}/g, (_tum, ad) => degerler[String(ad).toLocaleLowerCase("tr-TR")] ?? "");
+}
 
 function mesajOlustur(islem) {
-  return `Merhaba, “${String(islem || "").trim()}” işlemi için uzak bağlantı ile sorununuz çözülmüştür. İyi günler dileriz.`;
+  return mesajSablonuDoldur(VARSAYILAN_MESAJ_SABLONU, { islem });
+}
+
+function mesajMetniCevir(metin, islem) {
+  const sonuc = String(metin || mesajOlustur(islem)).trim();
+  return sonuc && sonuc.length <= 1000 ? sonuc : null;
 }
 
 function mesajPenceresiAcik(kayitTarihi, simdi = new Date()) {
@@ -39,10 +72,11 @@ function disaAktar(row) {
     mesaj,
     deneme: Number(row.DENEME || 0),
     gonderimTarihi: row.GONDERIMTARIHI || null,
+    metin: row.METIN || null,
   };
 }
 
-const MESAJ_SUTUNLARI = `TICKETID, TELEFON, DURUM, DENEME, MESAJID, SONHATA, GONDERIMTARIHI`;
+const MESAJ_SUTUNLARI = `TICKETID, TELEFON, METIN, DURUM, DENEME, MESAJID, SONHATA, GONDERIMTARIHI`;
 
 // Pencerenin kesin sınırı SQL Server saatiyle uygulanır; istemci saati yetkili değil.
 const SURESI_DOLDU = `DATEADD(MINUTE, ${MESAJ_PENCERESI_DAKIKA}, KAYITTARIHI) <= GETDATE()`;
@@ -50,7 +84,7 @@ const SURESI_DOLDU_PARAM = `DATEADD(MINUTE, ${MESAJ_PENCERESI_DAKIKA}, @kayit) <
 const SURE_HATASI = `${MESAJ_PENCERESI_DAKIKA} dakika içinde gönderilemedi.`;
 
 /** Tüm makineler mesajı ortak DB kuyruğuna bırakır; yalnız ana makine gönderir. */
-async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTarihi, simdi } = {}) {
+async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTarihi, simdi, metin } = {}) {
   // simdi yalnız saf kural testleri için verilir. Üretimde kesin sınır SQL
   // Server GETDATE() ile uygulanır; istemci bilgisayarın saati yetkili değildir.
   if (simdi && !mesajPenceresiAcik(kayitTarihi, simdi)) {
@@ -67,6 +101,8 @@ async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTa
   if (!Number.isInteger(Number(ticketId)) || Number(ticketId) < 1) {
     throw new Error("WhatsApp kuyruğu için işlem kaydı kimliği gerekli.");
   }
+  const mesajMetni = mesajMetniCevir(metin, islem);
+  if (!mesajMetni) throw new Error("WhatsApp mesajı 1-1000 karakter olmalı.");
 
   const telefon = cariTelefonu(kart);
   const ilkDurum = telefon ? "BEKLIYOR" : "HATA";
@@ -77,7 +113,7 @@ async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTa
     .input("donem", sql.NVarChar(4), String(donemNo))
     .input("cari", sql.Int, Number(kart.IND))
     .input("telefon", sql.NVarChar(20), telefon || null)
-    .input("metin", sql.NVarChar(1000), mesajOlustur(islem))
+    .input("metin", sql.NVarChar(1000), mesajMetni)
     .input("kayit", sql.DateTime, kayitTarihi)
     .input("durum", sql.NVarChar(20), ilkDurum)
     .input("hata", sql.NVarChar(1000), ilkHata).query(`
@@ -114,9 +150,14 @@ async function mesajDurumu(ticketId) {
 
 module.exports = {
   MESAJ_PENCERESI_DAKIKA,
+  VARSAYILAN_MESAJ_SABLONU,
+  MESAJ_DEGISKENLERI,
   SURESI_DOLDU,
   SURE_HATASI,
   mesajOlustur,
+  mesajSablonuDogrula,
+  mesajSablonuDoldur,
+  mesajMetniCevir,
   mesajPenceresiAcik,
   disaAktar,
   bildirimGonder,

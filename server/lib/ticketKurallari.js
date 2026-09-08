@@ -65,4 +65,13 @@ function rvCevir(value) {
   return /^[0-9a-fA-F]{16}$/.test(raw) ? Buffer.from(raw, "hex") : null;
 }
 
-module.exports = { ucretCevir, tarihCevir, rvCevir };
+/** YYYY-MM aylık liste filtresi. */
+function ayCevir(value) {
+  const raw = String(value ?? "").trim();
+  const m = raw.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const ay = Number(m[2]);
+  return ay >= 1 && ay <= 12 ? raw : null;
+}
+
+module.exports = { ucretCevir, tarihCevir, rvCevir, ayCevir };
