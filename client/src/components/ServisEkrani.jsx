@@ -8,6 +8,7 @@ const DURUMLAR = [
   { kod: "KABUL", ad: "Kabul", sinif: "bg-amber-100 text-amber-900" },
   { kod: "ISLEMDE", ad: "İşlemde", sinif: "bg-blue-100 text-blue-900" },
   { kod: "HAZIR", ad: "Hazır", sinif: "bg-emerald-100 text-emerald-900" },
+  { kod: "KARGODA", ad: "Kargoda", sinif: "bg-violet-100 text-violet-900" },
   { kod: "TESLIM", ad: "Teslim", sinif: "bg-gray-200 text-gray-700" },
   { kod: "IPTAL", ad: "İptal", sinif: "bg-red-100 text-red-900" },
 ];
