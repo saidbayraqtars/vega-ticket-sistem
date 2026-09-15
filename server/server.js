@@ -11,7 +11,9 @@ const ticketRoute = require("./routes/ticket");
 const servisRoute = require("./routes/servis");
 const etiketRoute = require("./routes/etiket");
 const whatsappRoute = require("./routes/whatsapp");
+const kullaniciRoute = require("./routes/kullanici");
 const whatsappWorker = require("./lib/whatsappWorker");
+const oturum = require("./lib/oturum");
 
 const PORT = parseInt(process.env.PORT, 10) || 3010;
 const app = express();
@@ -51,7 +53,35 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
+/**
+ * İsteğe bağlı PIN girişi. Geçerli oturum belirteci varsa kullanıcı ondan
+ * alınır (başlıktaki ad yok sayılır). Belirteç yoksa ve kullanıcının PIN'i
+ * tanımlıysa istek reddedilir; arayüz giriş ekranını açar.
+ */
+const PIN_MUAF = (yol) => yol === "/saglik" || yol === "/kurulum/durum" || yol.startsWith("/kullanici/");
+app.use("/api", async (req, res, next) => {
+  const belirtec = String(req.header("x-oturum") || "").trim();
+  const oturumKullanici = belirtec ? oturum.oturumCoz(belirtec) : null;
+  if (oturumKullanici) {
+    req.kullanici = oturumKullanici;
+    req.oturumlu = true;
+    req.oturumBelirteci = belirtec;
+    return next();
+  }
+  if (PIN_MUAF(req.path) || !db.bagliMi() || !req.kullanici) return next();
+  try {
+    const pinliler = await oturum.pinliKullanicilar();
+    if (pinliler.has(oturum.anahtar(req.kullanici))) {
+      return res.status(401).json({ ok: false, girisGerekli: true, mesaj: "Bu kullanıcı için PIN ile giriş gerekli." });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.use("/api/kurulum", kurulumRoute);
+app.use("/api/kullanici", kullaniciRoute);
 app.use("/api/cari", cariRoute);
 app.use("/api/ticket", ticketRoute);
 app.use("/api/servis", servisRoute);

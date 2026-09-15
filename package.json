@@ -1,6 +1,6 @@
 {
   "name": "vega-ticket-sistem",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "description": "Vega Ticket Sistem — Vega ERP carileri üzerinde sözleşme/süre takibi ve ticket yönetimi. VegaDB salt-okunur, ticket verisi ayrı VEGATICKETDB'de.",
   "scripts": {

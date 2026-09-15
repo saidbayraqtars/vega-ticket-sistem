@@ -11,7 +11,7 @@ const bugunYerel = () => {
 };
 const bosIslemFormu = { baslik: "", ucret: "", whatsappSablonu: VARSAYILAN_MESAJ_SABLONU };
 
-export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, onMusteriDegisti }) {
+export default function CariDetay({ firmaNo, donemNo, cariInd, yenilemeTetik, onTicketDegisti, onMusteriDegisti }) {
   const [veri, setVeri] = useState(null);
   const [hata, setHata] = useState(null);
   const [form, setForm] = useState(bosIslemFormu);
@@ -57,6 +57,18 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
       .catch((e) => !iptal && setHata(e.message));
     return () => { iptal = true; };
   }, [cariInd, firmaNo, donemNo]);
+
+  // Liste tazelenince açık kart da Vega'daki güncel türü göstersin. Yazılmakta
+  // olan işlem formuna dokunulmaz, yalnız kart verisi yenilenir.
+  useEffect(() => {
+    if (!cariInd || !yenilemeTetik) return undefined;
+    let iptal = false;
+    api.cariDetay(cariInd, { firma: firmaNo, donem: donemNo })
+      .then((r) => { if (!iptal) setVeri(r); })
+      .catch(() => { /* bir sonraki tazelemede yeniden denenir */ });
+    return () => { iptal = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yenilemeTetik]);
 
   useEffect(() => {
     if (!waBildirim?.sirada || !waBildirim?.ticketId) return undefined;
@@ -165,7 +177,7 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, onTicketDegisti, 
             {anlasmali ? "ANLAŞMALI MÜŞTERİ" : yeniMusteri ? "YENİ MÜŞTERİ" : "TÜR TANIMLANMAMIŞ"}
           </div>
           <div className="text-[11px] opacity-80">
-            Özel kod: {kart.KOD1 || "—"} · {anlasmali ? "Süre otomatik 1 yıl" : yeniMusteri ? "Süre elle tanımlanabilir" : "Özel kod kontrol edilmeli"}
+            Vega özel kod 1: {kart.KOD1 || "boş"} · {anlasmali ? "Süre otomatik 1 yıl" : yeniMusteri ? "Süre elle tanımlanabilir" : "Özel kod 1'e ANLAŞMALI veya YENİ MÜŞTERİ yazılmalı"}
           </div>
         </div>
         <div className={`mt-3 rounded border px-3 py-2 ${bakiyeSinif}`}>

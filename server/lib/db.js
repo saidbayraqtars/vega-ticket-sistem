@@ -34,6 +34,35 @@ function sqlConfig(config, database) {
   return out;
 }
 
+/** Servis ve cihaz durumlarının tek kaynağı; kısıtlar ve route bundan üretilir. */
+const SERVIS_DURUMLARI = ["KABUL", "ISLEMDE", "HAZIR", "ARIZADA", "KARGODA", "TESLIM", "IPTAL"];
+const durumListesiSql = SERVIS_DURUMLARI.map((d) => `'${d}'`).join(",");
+
+/**
+ * Durum kısıtı listede olmayan bir durumu içermiyorsa düşürülüp güncel listeyle
+ * yeniden kurulur. Her yeni durumda eski kurulumlar kendiliğinden yükselir.
+ */
+function durumKisitiYukselt(tablo, kisit) {
+  const eksik = SERVIS_DURUMLARI.map((d) => `definition NOT LIKE '%''${d}''%'`).join(" OR ");
+  return `IF OBJECT_ID('dbo.${tablo}','U') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.${tablo}')
+         AND name = '${kisit}'
+         AND NOT (${eksik})
+     )
+   BEGIN
+     IF EXISTS (
+       SELECT 1 FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.${tablo}')
+         AND name = '${kisit}'
+     )
+       ALTER TABLE dbo.${tablo} DROP CONSTRAINT ${kisit};
+     ALTER TABLE dbo.${tablo} WITH CHECK ADD CONSTRAINT ${kisit}
+       CHECK (DURUM IN (${durumListesiSql}));
+   END`;
+}
+
 const TICKET_SEMA = [
   `IF OBJECT_ID('dbo.KULLANICILAR','U') IS NULL
    CREATE TABLE dbo.KULLANICILAR (
@@ -232,27 +261,12 @@ const TICKET_SEMA = [
      SILINDI          BIT           NOT NULL DEFAULT 0,
      RV               ROWVERSION,
      CONSTRAINT CK_SERVISKAYITLARI_DURUM CHECK
-       (DURUM IN ('KABUL','ISLEMDE','HAZIR','KARGODA','TESLIM','IPTAL'))
+       (DURUM IN (${durumListesiSql}))
    )`,
 
-  // Eski kurulumlardaki durum kısıtını şehir dışı gönderiler için genişlet.
-  `IF OBJECT_ID('dbo.SERVISKAYITLARI','U') IS NOT NULL
-     AND NOT EXISTS (
-       SELECT 1 FROM sys.check_constraints
-       WHERE parent_object_id = OBJECT_ID('dbo.SERVISKAYITLARI')
-         AND name = 'CK_SERVISKAYITLARI_DURUM'
-         AND definition LIKE '%KARGODA%'
-     )
-   BEGIN
-     IF EXISTS (
-       SELECT 1 FROM sys.check_constraints
-       WHERE parent_object_id = OBJECT_ID('dbo.SERVISKAYITLARI')
-         AND name = 'CK_SERVISKAYITLARI_DURUM'
-     )
-       ALTER TABLE dbo.SERVISKAYITLARI DROP CONSTRAINT CK_SERVISKAYITLARI_DURUM;
-     ALTER TABLE dbo.SERVISKAYITLARI WITH CHECK ADD CONSTRAINT CK_SERVISKAYITLARI_DURUM
-       CHECK (DURUM IN ('KABUL','ISLEMDE','HAZIR','KARGODA','TESLIM','IPTAL'));
-   END`,
+  // Eski kurulumlardaki durum kısıtını genişlet: KARGODA (müşteriye kargoya
+  // verildi) ve ARIZADA (üretici/yetkili servise arızaya gönderildi).
+  durumKisitiYukselt("SERVISKAYITLARI", "CK_SERVISKAYITLARI_DURUM"),
 
   `IF OBJECT_ID('dbo.CIHAZLAR','U') IS NULL
    CREATE TABLE dbo.CIHAZLAR (
@@ -273,26 +287,59 @@ const TICKET_SEMA = [
      CONSTRAINT FK_CIHAZLAR_SERVIS FOREIGN KEY (SERVISID)
        REFERENCES dbo.SERVISKAYITLARI (ID),
      CONSTRAINT CK_CIHAZLAR_DURUM CHECK
-       (DURUM IN ('KABUL','ISLEMDE','HAZIR','KARGODA','TESLIM','IPTAL'))
+       (DURUM IN (${durumListesiSql}))
    )`,
 
-  `IF OBJECT_ID('dbo.CIHAZLAR','U') IS NOT NULL
-     AND NOT EXISTS (
-       SELECT 1 FROM sys.check_constraints
-       WHERE parent_object_id = OBJECT_ID('dbo.CIHAZLAR')
-         AND name = 'CK_CIHAZLAR_DURUM'
-         AND definition LIKE '%KARGODA%'
-     )
-   BEGIN
-     IF EXISTS (
-       SELECT 1 FROM sys.check_constraints
-       WHERE parent_object_id = OBJECT_ID('dbo.CIHAZLAR')
-         AND name = 'CK_CIHAZLAR_DURUM'
-     )
-       ALTER TABLE dbo.CIHAZLAR DROP CONSTRAINT CK_CIHAZLAR_DURUM;
-     ALTER TABLE dbo.CIHAZLAR WITH CHECK ADD CONSTRAINT CK_CIHAZLAR_DURUM
-       CHECK (DURUM IN ('KABUL','ISLEMDE','HAZIR','KARGODA','TESLIM','IPTAL'));
-   END`,
+  durumKisitiYukselt("CIHAZLAR", "CK_CIHAZLAR_DURUM"),
+
+  // Arızaya gönderim / kargoya verme geçmişi. Durum SERVISKAYITLARI'nda anlık
+  // tutulur; cihaz servise gidip dönüp müşteriye kargolanınca ilk gönderimin
+  // alıcı ve takip bilgisi kaybolmasın diye her gönderim ayrı satırdır.
+  `IF OBJECT_ID('dbo.SERVISGONDERIMLERI','U') IS NULL
+   CREATE TABLE dbo.SERVISGONDERIMLERI (
+     ID               INT IDENTITY(1,1) PRIMARY KEY,
+     SERVISID         INT            NOT NULL,
+     TUR              NVARCHAR(10)   NOT NULL,
+     ALICIADI         NVARCHAR(200)  NOT NULL,
+     ALICIYETKILI     NVARCHAR(100)  NULL,
+     ALICITELEFON     NVARCHAR(40)   NULL,
+     ALICIADRES       NVARCHAR(600)  NULL,
+     ALICIIL          NVARCHAR(100)  NULL,
+     KARGOFIRMASI     NVARCHAR(60)   NULL,
+     TAKIPNO          NVARCHAR(60)   NULL,
+     NOTU             NVARCHAR(400)  NULL,
+     GONDEREN         NVARCHAR(60)   NOT NULL,
+     TARIH            DATETIME       NOT NULL DEFAULT GETDATE(),
+     CONSTRAINT FK_SERVISGONDERIMLERI_SERVIS FOREIGN KEY (SERVISID)
+       REFERENCES dbo.SERVISKAYITLARI (ID),
+     CONSTRAINT CK_SERVISGONDERIMLERI_TUR CHECK (TUR IN ('ARIZA','KARGO'))
+   )`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SERVISGONDERIMLERI_SERVIS')
+   CREATE INDEX IX_SERVISGONDERIMLERI_SERVIS ON dbo.SERVISGONDERIMLERI (SERVISID, TARIH DESC)`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SERVISGONDERIMLERI_TUR')
+   CREATE INDEX IX_SERVISGONDERIMLERI_TUR ON dbo.SERVISGONDERIMLERI (TUR, TARIH DESC)
+     INCLUDE (ALICIADI, ALICIYETKILI, ALICITELEFON, ALICIADRES, ALICIIL)`,
+
+  // Tüm bilgisayarların paylaştığı ayarlar (ör. adres etiketindeki gönderen).
+  `IF OBJECT_ID('dbo.ORTAKAYARLAR','U') IS NULL
+   CREATE TABLE dbo.ORTAKAYARLAR (
+     ANAHTAR           NVARCHAR(60)   NOT NULL PRIMARY KEY,
+     DEGER             NVARCHAR(MAX)  NULL,
+     GUNCELLEYEN       NVARCHAR(60)   NULL,
+     GUNCELLEMETARIHI  DATETIME       NOT NULL DEFAULT GETDATE()
+   )`,
+
+  // WhatsApp oturumunun hangi kullanıcıda açık olduğu: ana bilgisayarda
+  // uygulamayı kullanan kişi kalp atışıyla yazılır.
+  `IF COL_LENGTH('dbo.WHATSAPPAYARLARI','ANAKULLANICI') IS NULL
+   ALTER TABLE dbo.WHATSAPPAYARLARI ADD ANAKULLANICI NVARCHAR(60) NULL`,
+
+  // Şablonu en son kimin değiştirdiği zaten GUNCELLEYEN'de; PIN girişi için
+  // KULLANICILAR.PAROLAHASH kullanılır (scrypt, bkz. lib/pin.js).
+  `IF COL_LENGTH('dbo.KULLANICILAR','PINGUNCELLEMETARIHI') IS NULL
+   ALTER TABLE dbo.KULLANICILAR ADD PINGUNCELLEMETARIHI DATETIME NULL`,
 
   `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_CIHAZLAR_SERVIS')
    CREATE INDEX IX_CIHAZLAR_SERVIS ON dbo.CIHAZLAR (SERVISID, SIRA)`,
@@ -368,4 +415,4 @@ const config = () => aktifConfig;
 const bagliMi = () => Boolean(vegaPool?.connected && ticketPool?.connected);
 const baglaniyorMu = () => baglaniyor;
 
-module.exports = { baglan, kapat, vega, ticket, config, bagliMi, baglaniyorMu, sqlConfig, ticketDbHazirla };
+module.exports = { SERVIS_DURUMLARI, baglan, kapat, vega, ticket, config, bagliMi, baglaniyorMu, sqlConfig, ticketDbHazirla };

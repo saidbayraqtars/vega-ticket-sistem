@@ -4,6 +4,7 @@ const db = require("../lib/db");
 const vega = require("../lib/vega");
 const arama = require("../lib/arama");
 const cariCache = require("../lib/cariCache");
+const cariListe = require("../lib/cariListe");
 const { hesaplaMusteriSuresi } = require("../lib/musteriSuresi");
 const { normalizeTur, TUR_YENI } = require("../lib/sozlesme");
 const { tarihCevir } = require("../lib/ticketKurallari");
@@ -41,8 +42,6 @@ function sureImzasi(sureler) {
  */
 const listeBellek = new Map();
 const LISTE_BELLEK_SINIRI = 12;
-// localeCompare her çağrıda yerel ayarı yeniden çözer; tek Collator ~2 kat hızlı.
-const trSirala = new Intl.Collator("tr", { sensitivity: "base", numeric: true });
 
 function siraliListe(firmaNo, donemNo, onbellek, sureler, sirala, yon) {
   // Gün de imzaya girer: sözleşme durumu "bugün"e göre hesaplandığı için
@@ -54,18 +53,7 @@ function siraliListe(firmaNo, donemNo, onbellek, sureler, sirala, yon) {
   if (mevcut?.imza === imza) return mevcut.liste;
 
   const bugun = new Date();
-  const liste = onbellek.rows.map((r) => zenginlestir(r, sureler, bugun));
-  const carpan = yon === "desc" ? -1 : 1;
-  liste.sort((a, b) => {
-    if (sirala === "bakiye") return (Number(a.BAKIYE) - Number(b.BAKIYE)) * carpan;
-    if (sirala === "kod") return trSirala.compare(a.FIRMAKODU, b.FIRMAKODU) * carpan;
-    if (sirala === "bitis") {
-      const av = String(a.sure.bitisISO || "9999-12-31");
-      const bv = String(b.sure.bitisISO || "9999-12-31");
-      return (av < bv ? -1 : av > bv ? 1 : 0) * carpan;
-    }
-    return trSirala.compare(a.AD, b.AD) * carpan;
-  });
+  const liste = cariListe.sirala(onbellek.rows.map((r) => zenginlestir(r, sureler, bugun)), sirala, yon);
 
   // Aynı önbellek sürümüne ait eski sıralama girdileri artık geçersiz.
   for (const [k, v] of listeBellek) if (v.imza !== imza && listeBellek.size > LISTE_BELLEK_SINIRI) listeBellek.delete(k);
@@ -100,11 +88,20 @@ router.get("/liste", async (req, res, next) => {
     ]);
     const limit = Math.min(parseInt(req.query.limit, 10) || 300, 2000);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const sirala = String(req.query.sirala || "ad");
+    const sirala = cariListe.siralamaAnahtari(String(req.query.sirala || "ad"));
     const yon = String(req.query.yon || "asc") === "desc" ? "desc" : "asc";
-    const liste = siraliListe(firmaNo, donemNo, onbellek, sureler, sirala, yon);
+    const tumListe = siraliListe(firmaNo, donemNo, onbellek, sureler, sirala, yon);
+    const liste = cariListe.filtrele(tumListe, cariListe.filtreCevir(req.query));
 
-    res.json({ ok: true, toplam: liste.length, offset, limit, kayitlar: liste.slice(offset, offset + limit) });
+    res.json({
+      ok: true,
+      toplam: liste.length,
+      genelToplam: tumListe.length,
+      offset,
+      limit,
+      ozet: cariListe.ozet(liste),
+      kayitlar: liste.slice(offset, offset + limit),
+    });
   } catch (err) {
     next(err);
   }

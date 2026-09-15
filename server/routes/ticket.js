@@ -246,6 +246,52 @@ router.patch("/:id", async (req, res, next) => {
   }
 });
 
+/**
+ * WhatsApp metnini herkes düzenleyebilir. Mesaj henüz gönderilmediyse (sırada
+ * veya hatalı) kuyruktaki metin de değişir; gönderildiyse yalnız kayıt güncellenir.
+ */
+router.patch("/:id/whatsapp", async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ ok: false, mesaj: "Geçersiz ID." });
+    const metin = String(req.body?.METIN ?? "").trim();
+    if (!metin || metin.length > 1000) {
+      return res.status(400).json({ ok: false, mesaj: "WhatsApp mesajı 1-1000 karakter olmalı." });
+    }
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+    const r = await db.ticket().request()
+      .input("id", sql.Int, id)
+      .input("metin", sql.NVarChar(1000), metin)
+      .input("kullanici", sql.NVarChar(60), kullanici).query(`
+        UPDATE dbo.TICKETLER SET WHATSAPPMETNI = @metin, GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+        WHERE ID = @id AND SILINDI = 0;
+        IF @@ROWCOUNT = 0 THROW 51001, 'İşlem kaydı bulunamadı.', 1;
+
+        -- GONDERILIYOR satırı ana makinenin elinde; ona dokunulmaz.
+        UPDATE dbo.WHATSAPPMESAJLARI SET METIN = @metin, GUNCELLEMETARIHI = GETDATE()
+        WHERE TICKETID = @id AND DURUM IN ('BEKLIYOR','HATA');
+
+        SELECT ${SUTUNLAR},
+          (SELECT TOP 1 W.DURUM FROM dbo.WHATSAPPMESAJLARI W WHERE W.TICKETID = dbo.TICKETLER.ID) AS WHATSAPPDURUMU,
+          (SELECT TOP 1 W.SONHATA FROM dbo.WHATSAPPMESAJLARI W WHERE W.TICKETID = dbo.TICKETLER.ID) AS WHATSAPPHATA
+        FROM dbo.TICKETLER WHERE ID = @id;
+      `);
+    const kayit = disaAktar(r.recordset[0]);
+    await logYaz(id, kullanici, "WHATSAPPMETNI", null, metin, "WhatsApp mesajı düzenlendi.");
+    const gonderildi = ["GONDERILDI", "GONDERILIYOR"].includes(kayit.WHATSAPPDURUMU);
+    res.json({
+      ok: true,
+      kayit,
+      mesaj: gonderildi
+        ? "Mesaj zaten gönderilmişti; değişiklik yalnız kayda işlendi."
+        : "Mesaj güncellendi.",
+    });
+  } catch (err) {
+    if (/İşlem kaydı bulunamadı/.test(err.message)) return res.status(404).json({ ok: false, mesaj: "İşlem kaydı bulunamadı." });
+    next(err);
+  }
+});
+
 /** Patron takibi: çift tıklanan bekleyen işlem tamamlananlara taşınır. */
 router.post("/:id/onayla", async (req, res, next) => {
   try {

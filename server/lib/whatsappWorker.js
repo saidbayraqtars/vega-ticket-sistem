@@ -1,6 +1,7 @@
 const os = require("os");
 const sql = require("mssql");
 const db = require("./db");
+const cfg = require("./config");
 const whatsapp = require("./whatsapp");
 const { SURESI_DOLDU, SURE_HATASI } = require("./whatsappBildirim");
 
@@ -31,11 +32,14 @@ const ucustakiler = new Set();
 async function ayarAl() {
   if (!db.bagliMi()) return null;
   const r = await db.ticket().request().query(`
-    SELECT ID, ANAMAKINE, BAGLI, HESAP, SONHATA, SONYOKLAMA, GUNCELLEYEN, GUNCELLEMETARIHI
+    SELECT ID, ANAMAKINE, ANAKULLANICI, BAGLI, HESAP, SONHATA, SONYOKLAMA, GUNCELLEYEN, GUNCELLEMETARIHI
     FROM dbo.WHATSAPPAYARLARI WHERE ID = 1
   `);
   return r.recordset[0] || null;
 }
+
+/** Ana bilgisayarda uygulamayı o an kullanan kişi — giriş yapınca config'e yazılır. */
+const yerelKullanici = () => String(cfg.readConfig()?.kullanici || "").trim().slice(0, 60) || null;
 
 const buMakineAna = (ayar) =>
   Boolean(ayar?.ANAMAKINE && ayar.ANAMAKINE.toLocaleLowerCase("tr-TR") === MAKINE.toLocaleLowerCase("tr-TR"));
@@ -47,10 +51,10 @@ async function anaMakineYap(kullanici) {
       MERGE dbo.WHATSAPPAYARLARI WITH (HOLDLOCK) AS H
       USING (SELECT CAST(1 AS TINYINT) AS ID) AS K ON H.ID = K.ID
       WHEN MATCHED THEN UPDATE SET
-        ANAMAKINE = @makine, BAGLI = 0, HESAP = NULL, SONHATA = NULL,
+        ANAMAKINE = @makine, ANAKULLANICI = @kullanici, BAGLI = 0, HESAP = NULL, SONHATA = NULL,
         SONYOKLAMA = NULL, GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
-      WHEN NOT MATCHED THEN INSERT (ID, ANAMAKINE, GUNCELLEYEN)
-        VALUES (1, @makine, @kullanici);
+      WHEN NOT MATCHED THEN INSERT (ID, ANAMAKINE, ANAKULLANICI, GUNCELLEYEN)
+        VALUES (1, @makine, @kullanici, @kullanici);
     `);
   uyandir();
   return durumAl();
@@ -61,9 +65,11 @@ async function kalpAtisi(durum) {
     .input("makine", sql.NVarChar(128), MAKINE)
     .input("bagli", sql.Bit, Boolean(durum.hazir))
     .input("hesap", sql.NVarChar(40), durum.hesap || null)
-    .input("hata", sql.NVarChar(500), durum.hata ? String(durum.hata).slice(0, 500) : null).query(`
+    .input("hata", sql.NVarChar(500), durum.hata ? String(durum.hata).slice(0, 500) : null)
+    .input("kullanici", sql.NVarChar(60), yerelKullanici()).query(`
       UPDATE dbo.WHATSAPPAYARLARI SET
-        BAGLI = @bagli, HESAP = @hesap, SONHATA = @hata, SONYOKLAMA = GETDATE()
+        BAGLI = @bagli, HESAP = @hesap, SONHATA = @hata, SONYOKLAMA = GETDATE(),
+        ANAKULLANICI = ISNULL(@kullanici, ANAKULLANICI)
       WHERE ID = 1 AND ANAMAKINE = @makine
     `);
 }
@@ -187,6 +193,9 @@ async function durumAl() {
     ayarli: Boolean(ayar),
     buMakine: MAKINE,
     anaMakine: ayar?.ANAMAKINE || null,
+    // Oturumun açık olduğu kullanıcı: ana makinede çalışan uygulamanın kullanıcısı.
+    anaKullanici: ana ? yerelKullanici() || ayar?.ANAKULLANICI || null : ayar?.ANAKULLANICI || null,
+    anaYapan: ayar?.GUNCELLEYEN || null,
     buMakineAna: ana,
     hazir: ana ? Boolean(yerel?.hazir) : Boolean(ayar?.BAGLI && yoklamaTaze),
     baslatiliyor: ana ? Boolean(yerel?.baslatiliyor) : false,

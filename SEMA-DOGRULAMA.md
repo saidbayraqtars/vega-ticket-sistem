@@ -17,10 +17,10 @@ Tarih: 2026-08-27. Tümü canlı SQL ile doğrulandı (`Invoke-Sqlcmd`, localhos
 
 | IND | FIRMAKODU | FIRMAADI | KOD1 | FAKS |
 |---|---|---|---|---|
-| 111 | SİSTEM | TECHNO SİSTEM BİLGİSAYAR-ELEKT.-ALARM&GÜV.-TEKNİK | `ANLAŞMALI` | `11.12.2024` |
-| 126 | KARTAŞ-TENDA LOJİSTİK DIŞ.TİC.LTD.ŞTİ | KARTAŞ-TENDA LOJİSTİK | `YENİ MÜŞTERİ` | `29.11.2025` |
+| 111 | (cari kodu) | (anlaşmalı örnek müşteri) | `ANLAŞMALI` | `11.12.2024` |
+| 126 | (cari kodu) | (yeni müşteri örneği) | `YENİ MÜŞTERİ` | `29.11.2025` |
 
-⚠ **`K2` carisi boş.** `F0103TBLCARI` IND=60150 (FURKAN YILMAZ) → KOD1 boş, FAKS boş.
+⚠ **`K2` carisi boş.** `F0103TBLCARI` IND=60150 (bireysel cari) → KOD1 boş, FAKS boş.
 `F0101TBLCARI` IND=125253 → aynı, boş. Yani örnek giriş K2'ye değil, yukarıdaki 111 ve 126'ya yapılmış.
 
 ## 3. KOD1 bir açılır liste — tanımı tabloda duruyor ✔

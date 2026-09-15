@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api/client";
+import { api, kullaniciAl } from "../api/client";
 import { MESAJ_DEGISKENLERI, VARSAYILAN_MESAJ_SABLONU } from "../lib/whatsappSablon";
 
 export default function WhatsAppAyarlari() {
   const [durum, setDurum] = useState(null);
+  const [sablonBilgi, setSablonBilgi] = useState(null);
   const [mesgul, setMesgul] = useState(false);
   const [sablon, setSablon] = useState(VARSAYILAN_MESAJ_SABLONU);
   const [degiskenler, setDegiskenler] = useState(MESAJ_DEGISKENLERI);
@@ -24,6 +25,7 @@ export default function WhatsAppAyarlari() {
     api.whatsappSablon().then((r) => {
       setSablon(r.sablon);
       setDegiskenler(r.degiskenler || MESAJ_DEGISKENLERI);
+      setSablonBilgi({ guncelleyen: r.guncelleyen, tarih: r.guncellemeTarihi });
     }).catch((err) => setSablonMesaji({ hata: true, metin: err.message }));
     const timer = setInterval(durumYukle, 4000);
     return () => clearInterval(timer);
@@ -71,6 +73,7 @@ export default function WhatsAppAyarlari() {
     try {
       const r = await api.whatsappSablonKaydet(sablon);
       setSablon(r.sablon);
+      setSablonBilgi({ guncelleyen: kullaniciAl(), tarih: new Date() });
       setSablonMesaji({ hata: false, metin: "Mesaj şablonu tüm bilgisayarlar için kaydedildi." });
     } catch (err) {
       setSablonMesaji({ hata: true, metin: err.message });
@@ -101,8 +104,13 @@ export default function WhatsAppAyarlari() {
         )}
       </div>
 
+      <div className="mt-2 rounded border border-[#dfe3e8] bg-[#fbfcfd] px-3 py-2 text-[12px]">
+        WhatsApp oturumu açık: <strong>{durum?.anaKullanici || "—"}</strong> kullanıcısında,{" "}
+        <strong>{durum?.anaMakine || "ana bilgisayar henüz seçilmedi"}</strong> bilgisayarında
+        {durum?.anaYapan && <span className="text-gray-500"> · ana bilgisayarı seçen: {durum.anaYapan}</span>}
+      </div>
       <p className="mt-2 text-[11px] text-gray-500">
-        Bu bilgisayar: <strong>{durum?.buMakine || "—"}</strong> · Ana bilgisayar: <strong>{durum?.anaMakine || "henüz seçilmedi"}</strong>
+        Bu bilgisayar: <strong>{durum?.buMakine || "—"}</strong>{durum?.buMakineAna ? " (ana bilgisayar)" : ""}
       </p>
       <p className="mt-1 text-[11px] text-gray-500">
         QR yalnız ana bilgisayarda okutulur. Diğer bilgisayarların mesajları ortak veritabanı kuyruğu üzerinden otomatik olarak ana bilgisayara ulaşır.
@@ -123,6 +131,11 @@ export default function WhatsAppAyarlari() {
     <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
       <legend className="px-1 text-[12px] font-semibold text-gray-600">WhatsApp mesaj şablonu</legend>
       <label className="text-[12px] text-gray-600">Ticket kaydedildiğinde müşteriye gönderilecek ortak metin</label>
+      <div className="text-[11px] text-gray-500">
+        Tüm kullanıcılar düzenleyebilir; kaydedilen şablon her bilgisayarda geçerli olur.
+        {sablonBilgi?.guncelleyen && <> Son düzenleyen: <strong>{sablonBilgi.guncelleyen}</strong>
+          {sablonBilgi.tarih ? ` (${new Date(sablonBilgi.tarih).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })})` : ""}</>}
+      </div>
       <textarea ref={sablonAlani} value={sablon} onChange={(e) => setSablon(e.target.value)}
         maxLength={1000} rows={5}
         className="mt-1 w-full resize-y rounded border border-[#c7ccd4] px-3 py-2 outline-none focus:border-blue-500" />

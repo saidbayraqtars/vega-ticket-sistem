@@ -47,8 +47,24 @@ const AD_IFADESI = `COALESCE(
   '#' + CAST(C.IND AS NVARCHAR(20))
 )`;
 
-/** Her cari sorgusunda uygulanan zorunlu filtreler. */
-const CARI_FILTRE = `ISNULL(C.DELETED, 0) = 0 AND ISNULL(C.STATUS, 1) <> 2 AND C.IND >= 100`;
+/**
+ * Her cari sorgusunda uygulanan zorunlu filtreler.
+ * Vega'da STATUS 1 = aktif, 2 = pasif. Boş STATUS'lu kartlar e-faturadan
+ * otomatik açılmış tedarikçi kartlarıdır (canlıda hepsi FIRMATIPI=2), müşteri
+ * listesine girmemeli — bu yüzden "pasif değil" yerine "aktif" aranır.
+ */
+const CARI_FILTRE = `ISNULL(C.DELETED, 0) = 0 AND C.STATUS = 1 AND C.IND >= 100`;
+
+/**
+ * Kart tablosunun değişiklik imzası. Vega'da tür (KOD1), sözleşme tarihi (FAKS)
+ * veya aktif/pasif değişince önbellek TTL'yi beklemeden tazelensin diye.
+ * GUNCELLEMETARIHI her Vega sürümünde yok; CHECKSUM kolon adından bağımsız.
+ */
+const kartImzasiSorgusu = (tablo) => `
+  SELECT COUNT(*) AS ADET,
+    CHECKSUM_AGG(CHECKSUM(C.IND, C.FIRMAKODU, C.FIRMAADI, C.UNVAN, C.KOD1, C.FAKS,
+      C.STATUS, C.DELETED, C.YGSM, C.TELEFON1, C.YETKILI)) AS IMZA
+  FROM [${tablo}] C`;
 
 async function firmaDonemListesi(pool) {
   const firmalar = (
@@ -102,6 +118,7 @@ module.exports = {
   tabloDogrula,
   AD_IFADESI,
   CARI_FILTRE,
+  kartImzasiSorgusu,
   firmaDonemListesi,
   turSecenekleri,
 };

@@ -1,47 +1,134 @@
 # Vega Müşteri İşlemleri
 
-Şirket içinde arayan müşteriler için yapılan işlemi ve söylenen ücreti kaydeden Electron uygulaması.
+Vega ERP kullanan bir teknik servis firması için geliştirilmiş çok kullanıcılı masaüstü uygulaması. Uzaktan yapılan destek işlemlerini kaydeder, müşteriye WhatsApp ile bildirir, servise gelen cihazları etiketler ve arızaya gönderilen ya da kargoya verilen cihazları takip eder.
 
-## İş akışı
+ERP veritabanına **hiç yazmaz**. Müşteri kartlarını ve cari bakiyeleri salt okunur kullanır, kendi verisini ayrı bir SQL Server veritabanında tutar.
 
-- Öncelik, kategori, atanan kişi ve tahsilat aşaması yoktur.
-- Yeni kayıt patronun takibi için **Onay bekleyenler** ekranına düşer; satıra çift tıklanınca tamamlanır.
-- Ayarlar'daki ortak WhatsApp şablonu `{firma}`, `{kod}`, `{islem}`, `{ucret}`, `{tarih}` ve `{kullanici}` değişkenleriyle oluşturulur; işlem formunda gerçek gönderim önizlenebilir ve o kayıt için düzenlenebilir.
-- Uygulama fatura oluşturmaz ve Vega fatura tablolarına yazmaz.
-- Tamamlanan işlemler ekranı açıldığında yalnız içinde bulunulan ayı gösterir; ay filtresiyle geçmiş aya geçilebilir.
-- Müşteriler, üstte büyük arama alanı ve Excel benzeri listeyle gösterilir.
-- Cari borç durumu seçilen dönemdeki `SUM(BORC) - SUM(ALACAK)` toplamından hesaplanır.
-- Cari seçildiğinde özel koddaki müşteri türü büyük ve renkli olarak gösterilir.
-- `ANLAŞMALI`, `ANTLAŞMALI`, `ANLAŞMA` ve `SÖZLEŞMELİ` gibi yazım türevleri anlaşmalı kabul edilir; süre otomatik 12 aydır.
-- Yalnız özel kodu `YENİ MÜŞTERİ` olan cariye başlangıç tarihinden itibaren 1–12 ay süre verilebilir.
-- İşlem kaydedilince düzenlenen WhatsApp metni patron onayı beklenmeden ortak `VEGATICKETDB` kuyruğuna alınır. QR yalnız **Ayarlar → WhatsApp bağlantısı** bölümünden seçilen ana bilgisayarda okutulur; diğer bilgisayarlar QR istemeden aynı ana bilgisayar üzerinden gönderir. İlk 30 dakikada gönderilemeyen bildirim iptal edilir.
+**Teknolojiler:** Node.js · Express · SQL Server (mssql) · React 19 · Vite · Tailwind CSS 4 · Electron · Baileys (WhatsApp) · GitHub Releases ile otomatik güncelleme
 
-Vega veritabanı salt-okunurdur. İşlem kayıtları, süreler ve loglar ayrı `VEGATICKETDB` veritabanında tutulur.
+---
 
-## Veri modeli
+## Öne çıkanlar
 
-- `dbo.TICKETLER`: işlem, WhatsApp taslağı ve patron onayı; yeni kayıt `ONAY_BEKLIYOR`, çift tıklamayla `KAPALI` olur.
-- `dbo.CARISURELERI`: firma/cari bazında başlangıç tarihi ve 1–12 aylık süre.
-- `dbo.TICKETLOG`: kayıt ve düzenleme günlüğü.
-- `dbo.WHATSAPPAYARLARI`: tüm istemcilerin kullandığı tek ana WhatsApp bilgisayarı ve bağlantı kalp atışı.
-- `dbo.WHATSAPPMESAJAYARLARI`: tüm bilgisayarlarda ortak kullanılan değişkenli mesaj şablonu.
-- `dbo.WHATSAPPMESAJLARI`: merkezi gönderim kuyruğu, deneme/hata/gönderim/iptal durumu.
-- Vega `TBLCARI`: müşteri kartı için salt-okunur.
-- Vega `TBLCARIHAREKETLERI`: seçilen dönem borç/alacak bakiyesi için salt-okunur.
+| Konu | Çözüm |
+|---|---|
+| ERP'ye dokunmadan entegrasyon | Vega tablolarına yalnız `SELECT`. Tablo adları dinamik olduğu için her ad desen ve `INFORMATION_SCHEMA` ile doğrulanır. |
+| 40 bin carilik anlık liste | Kartlar bellekte tutulur. Tür/pasif değişikliği `CHECKSUM_AGG` imzasıyla 15 sn içinde yakalanır; bakiye TTL ile tazelenir. |
+| Türkçe "Google mantığı" arama | Karakter normalizasyonu, trigram benzerliği ve sınırlı Levenshtein ile "şunu mu demek istediniz?" önerisi. |
+| Çok kullanıcılı düzenleme | `ROWVERSION` ile iyimser kilitleme. Çakışan kayıt güncel haliyle döner, kimse başkasının değişikliğini ezmez. |
+| Tek WhatsApp oturumu | QR yalnız seçilen ana bilgisayarda okutulur. Diğer bilgisayarlar mesajı DB kuyruğuna bırakır; ana bilgisayar `UPDLOCK, READPAST` ile sırayla gönderir. |
+| Termal etiket | ZPL/TSPL ham komutları ya da Windows yazıcı sürücüsü (GDI+). Türkçe için CP857 kodlaması. |
+| A5 adres etiketi ve barkod | Bağımlılıksız Code 128 üreticisi; çıktısı bağımsız bir barkod kütüphanesiyle birebir doğrulandı. |
+| İsteğe bağlı PIN girişi | 4-6 haneli PIN, tuzlanmış `scrypt` özeti, yanlış denemede süreli kilit. |
+| Şema yükseltme | Her açılışta idempotent migrasyon. Durum kısıtları tek listeden üretilir, eski kurulumlar veri kaybı olmadan yükselir. |
 
-Firma ve dönem sabit değildir; kurulum veya Ayarlar ekranından seçilir.
+## Özellikler
+
+### Müşteriler
+- Büyük arama alanı ve Excel benzeri liste: tüm sütunlar sıralanır, başlık altındaki kutularla filtrelenir.
+- Seçilen dönemdeki cari hareketlerinden borç/alacak durumu (`SUM(BORC) - SUM(ALACAK)`).
+- Vega'daki özel kod 1'den müşteri türü: `ANLAŞMALI` (ve `ANTLAŞMALI`, `SÖZLEŞMELİ` gibi yazım türevleri) otomatik 12 ay, `YENİ MÜŞTERİ` için 1-12 ay elle süre.
+- Yalnız aktif cariler listelenir.
+
+### İşlem kaydı ve onay
+- Yapılan işlem ve söylenen ücret kaydedilir; kayıt **Onay bekleyenler** listesine düşer, çift tıklamayla tamamlanır.
+- Tamamlanan işlemler aylık görünür, hücre içinde düzenlenir; 4 saniyelik değişiklik yoklamasıyla tüm ekranlar güncel kalır.
+
+### WhatsApp
+- Ortak, değişkenli mesaj şablonu (`{firma}`, `{islem}`, `{ucret}`, `{tarih}`, `{kullanici}` …). Şablonu herkes düzenleyebilir.
+- İşlem kaydedildiği anda mesaj kuyruğa alınır; 30 dakikada gönderilemeyen mesaj iptal edilir.
+- Her ekranda bağlantı durumu ile oturumun hangi kullanıcıda ve bilgisayarda açık olduğu görünür.
+- Gönderilmemiş mesaj düzenlenebilir ve yeniden gönderilebilir.
+
+### Servis kabul, arıza ve kargo takibi
+- Müşteri cihazıyla geldiğinde kabul kaydı açılır; her cihaz için termal etiket basılır.
+- Sekmeler: Serviste · Arızaya gönderilenler · Kargoya verilenler · Teslim edilenler · İptal edilenler.
+- Arızaya gönderme / kargoya verme penceresi: alıcı adres defteri, Vega'dan müşteri adresi önerisi, kargo firması ve takip numarası. Gönderimler geçmişte ayrı satır olarak saklanır.
+- **A5 adres etiketi** ve **A5 barkod çıktısı**:
+
+| A5 adres etiketi | A5 barkod kartları |
+|---|---|
+| <img src="docs/gorseller/a5-adres-etiketi.png" alt="A5 arıza gönderim adres etiketi" width="360"> | <img src="docs/gorseller/a5-barkod-kartlari.png" alt="Cihaz başına Code 128 barkod kartları" width="360"> |
+
+> Görsellerdeki firma, müşteri ve adres bilgileri kurgusaldır.
 
 ## Mimari
 
-```text
-server/   Express + mssql; Vega ve VEGATICKETDB için ayrı bağlantı havuzları
-client/   React + Vite + Tailwind; Excel benzeri müşteri ve işlem tabloları
-desktop/  Electron + electron-builder
+```mermaid
+flowchart LR
+  subgraph PC["Her bilgisayar"]
+    E["Electron penceresi"] --> UI["React arayüzü"]
+    UI -->|"HTTP 127.0.0.1"| API["Yerel Express sunucusu"]
+  end
+  API -->|"yalnız SELECT"| VEGA[("Vega ERP<br/>SQL Server")]
+  API -->|"okuma / yazma"| TDB[("VEGATICKETDB<br/>SQL Server")]
+  subgraph ANA["Ana WhatsApp bilgisayarı"]
+    W["Kuyruk işçisi + Baileys"]
+  end
+  TDB <-->|"mesaj kuyruğu, kalp atışı"| W
+  W --> WA["WhatsApp"]
+  API --> YZ["Termal etiket yazıcısı"]
+  UI --> A5["A5 yazıcı (adres etiketi, barkod)"]
 ```
 
-Sunucu yalnız `127.0.0.1:3010` üzerinde dinler. Çok kullanıcılı düzenlemede `ROWVERSION` ile çakışma denetimi, dört saniyelik değişiklik yoklaması ve işlem logu kullanılır.
+```text
+server/   Express + mssql; Vega ve VEGATICKETDB için ayrı bağlantı havuzları
+  lib/      iş kuralları (sözleşme, arama, cari listesi, etiket, PIN, WhatsApp kuyruğu)
+  routes/   REST uçları
+  tests/    node:test birim ve kaynak sözleşme testleri
+client/   React + Vite + Tailwind
+  lib/      ortak tablo sıralama/filtre, Code 128, A5 yazdırma
+desktop/  Electron + electron-builder + electron-updater
+```
 
-## Geliştirme ve doğrulama
+Her bilgisayar kendi yerel sunucusunu çalıştırır ve yalnız `127.0.0.1:3010` üzerinde dinler. Paylaşılan durum (işlemler, servis kayıtları, WhatsApp kuyruğu, ortak ayarlar) SQL Server'dadır.
+
+## Veri modeli (VEGATICKETDB)
+
+| Tablo | İçerik |
+|---|---|
+| `TICKETLER` | İşlem, söylenen ücret, WhatsApp metni, onay durumu (`ONAY_BEKLIYOR` → `KAPALI`) |
+| `TICKETLOG` | Kayıt ve düzenleme günlüğü |
+| `CARISURELERI` | Yeni müşteriye tanımlanan 1-12 aylık süre |
+| `SERVISKAYITLARI` | Servis kabulü; `SERVISNO` IDENTITY'den türetilen hesaplanmış kolon |
+| `CIHAZLAR` | Kabuldeki cihazlar, arıza, etiket basım bilgisi |
+| `SERVISGONDERIMLERI` | Arızaya gönderim / kargo geçmişi: alıcı, adres, kargo firması, takip no |
+| `WHATSAPPAYARLARI` | Ana bilgisayar, oturumun açık olduğu kullanıcı, bağlantı kalp atışı |
+| `WHATSAPPMESAJLARI` | Merkezi gönderim kuyruğu ve deneme/hata/iptal durumu |
+| `WHATSAPPMESAJAYARLARI` | Ortak mesaj şablonu |
+| `ORTAKAYARLAR` | Tüm bilgisayarların paylaştığı ayarlar (ör. etiketteki gönderen) |
+| `KULLANICILAR` | Kullanıcılar ve isteğe bağlı PIN özeti |
+
+Vega tarafında yalnız `TBLCARI` (müşteri kartı), `TBLCARIHAREKETLERI` (dönem bakiyesi), `TBLCARIKODTAN`, `TBLFIRMA` ve `TBLDONEM` okunur. Firma ve dönem kurulum ekranından seçilir. Şema kanıtları: [SEMA-DOGRULAMA.md](SEMA-DOGRULAMA.md).
+
+## API özeti
+
+| Uç | İşlev |
+|---|---|
+| `GET /api/cari/liste` | Sayfalı müşteri listesi; `sirala`, `yon`, `kod`, `ad`, `tur`, `borc`, `sure` filtreleri |
+| `GET /api/cari/ara?q=` | Türkçe duyarlı, yazım hatası toleranslı arama |
+| `GET /api/cari/:ind` | Müşteri kartı, bakiye, süre ve tamamlanan işlemler |
+| `PUT` / `DELETE /api/cari/:ind/sure` | Yeni müşteri süresi |
+| `GET /api/ticket?durum=&ay=` | Onay bekleyen veya aylık tamamlanan işlemler |
+| `POST /api/ticket` | İşlem kaydı + WhatsApp kuyruğu |
+| `POST /api/ticket/:id/onayla` | Onaylayıp tamamlananlara taşıma |
+| `PATCH /api/ticket/:id` | İşlem metni / ücret (`RV` zorunlu) |
+| `PATCH /api/ticket/:id/whatsapp` | WhatsApp metnini düzenleme |
+| `GET /api/ticket/degisiklikler` | Çok kullanıcılı canlı değişiklikler |
+| `GET /api/servis?grup=` | `acik`, `ariza`, `kargo`, `teslim`, `iptal`, `tumu` listeleri ve adetler |
+| `POST /api/servis` | Servis kabulü |
+| `POST /api/servis/:id/gonderim` | Arızaya gönderme / kargoya verme (durum + gönderim tek işlemde) |
+| `PATCH /api/servis/gonderim/:id` | Takip no gibi sonradan belli olan bilgiler |
+| `GET /api/servis/gonderim/adresler` | Daha önce kullanılan alıcılar |
+| `GET /api/servis/:id/musteri-adres` | Vega kartından müşteri adresi |
+| `GET` / `POST /api/servis/gonderen` | Etiketteki ortak gönderen bilgisi |
+| `POST /api/etiket/bas` | Cihaz etiketlerini termal yazıcıya basma |
+| `GET /api/whatsapp/durum` | Bağlantı, ana bilgisayar ve oturum kullanıcısı |
+| `GET` / `POST /api/whatsapp/sablon` | Ortak mesaj şablonu |
+| `POST /api/whatsapp/gonder` | Başarısız bildirimi yeniden gönderme |
+| `GET /api/kullanici/liste` · `POST /api/kullanici/giris` · `POST /api/kullanici/pin` | Kullanıcı seçimi, PIN girişi, PIN yönetimi |
+
+## Geliştirme
 
 ```bash
 npm install
@@ -49,54 +136,21 @@ npm install --prefix server
 npm install --prefix client
 npm install --prefix desktop
 
-npm test --prefix server
+npm run dev              # sunucu (3010) + Vite arayüzü (5180)
+npm test --prefix server # 70 test
 npm run build --prefix client
-npm run dist
+npm run dist             # Windows kurulum dosyası → dist/
 ```
 
-Kurulum çıktısı `dist/Vega Ticket Setup 1.2.2.exe` dosyasıdır. Kullanıcı ayarları ve makineye özel WhatsApp oturumu `%APPDATA%/vega-ticket-desktop` altında tutulur.
+İlk açılışta kurulum ekranından SQL Server bağlantısı, firma, dönem ve kullanıcı seçilir; `VEGATICKETDB` yoksa oluşturulur. Bağlantı ayarı ve makineye özel WhatsApp oturumu `%APPDATA%/vega-ticket-desktop` altında tutulur, depoya girmez.
 
-### GitHub release ve otomatik güncelleme
+## Sürüm yayınlama ve otomatik güncelleme
 
-Kurulu uygulama açılıştan sonra `saidbayraqtars/vega-ticket-sistem-releases`
-deposundaki yeni sürümü kontrol eder, arka planda indirir ve kullanıcı onayıyla
-yeniden başlatıp kurar.
-
-Yeni sürüm yayınlama sırası:
+Kurulu uygulama açılıştan sonra herkese açık `saidbayraqtars/vega-ticket-sistem-releases` deposunu kontrol eder, yeni sürümü arka planda indirir ve kullanıcı onayıyla kurar.
 
 ```bash
-# package.json sürümlerini yükselt
-npm test --prefix server
-npm run build --prefix client
-npm run release
+# dört package.json sürümünü yükselt, RELEASE-NOTES-x.y.z.md yaz
+npm run release   # GitHub yazma yetkili GH_TOKEN gerekir
 ```
 
-Kök yayın betiği sürüm tag'ini release deposunda hazırlar, testleri çalıştırır,
-istemciyi derler ve Electron kurulumunu GitHub'a yükler. Komut için GitHub
-yazma yetkili `GH_TOKEN` bulunmalıdır. Kaynak kod
-`saidbayraqtars/vega-ticket-sistem`, kurulum dosyaları ise ayrı ve herkese açık
-`saidbayraqtars/vega-ticket-sistem-releases` deposundadır.
-
-## API özeti
-
-| Uç | İşlev |
-|---|---|
-| `GET /api/cari/liste?firma=&donem=` | Dönem bakiyeli müşteri listesi |
-| `GET /api/cari/ara?firma=&donem=&q=` | Türkçe duyarlı müşteri araması |
-| `GET /api/cari/:ind?firma=&donem=` | Müşteri, bakiye, süre ve bitmiş işlemler |
-| `PUT /api/cari/:ind/sure` | 1–12 aylık müşteri süresi kaydetme |
-| `DELETE /api/cari/:ind/sure` | Uygulamaya özel süreyi kaldırma |
-| `GET /api/ticket?firma=&durum=&ay=` | Onay bekleyen veya seçilen aydaki tamamlanmış işlemler |
-| `POST /api/ticket` | Onay bekleyen işlem kaydı ve anlık WhatsApp bildirimi |
-| `POST /api/ticket/:id/onayla` | Bekleyen işlemi tamamlananlara taşıma |
-| `PATCH /api/ticket/:id` | Yalnız işlem metni/ücret güncelleme; `RV` zorunlu |
-| `GET /api/ticket/degisiklikler` | Çok kullanıcılı canlı değişiklikler |
-| `GET /api/whatsapp/durum` | Ortak bağlantı durumu; QR yalnız seçili ana bilgisayara döner |
-| `GET /api/whatsapp/sablon` | Ortak değişkenli mesaj şablonunu okuma |
-| `POST /api/whatsapp/sablon` | Ortak mesaj şablonunu kaydetme |
-| `POST /api/whatsapp/ana-yap` | Bu bilgisayarı ortak ana WhatsApp bilgisayarı seçme |
-| `GET /api/whatsapp/mesaj/:ticketId` | Merkezi kuyruktaki mesaj durumunu okuma |
-| `POST /api/whatsapp/gonder` | İlk 30 dakika içindeki başarısız işlem bildirimini ticket kimliğiyle tekrar gönderme |
-| `POST /api/whatsapp/sifirla` | Yalnız ana bilgisayardaki WhatsApp oturumunu sıfırlama |
-
-Vega sorgu kuralları ve canlı şema kanıtları: [SEMA-DOGRULAMA.md](SEMA-DOGRULAMA.md).
+Yayın betiği tag ve release kaydını hazırlar, testleri çalıştırır, arayüzü derler ve Electron kurulumunu yükler. Sürüm notları `RELEASE-NOTES-*.md` dosyalarındadır.
