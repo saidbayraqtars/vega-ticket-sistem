@@ -2,7 +2,7 @@
 
 Güncelleme: **16.09.2026**
 
-Sürüm: **1.6.0**
+Sürüm: **1.6.1**
 
 Durum: **üretim paketi hazır**
 
@@ -12,7 +12,7 @@ Durum: **üretim paketi hazır**
 - Müşteri, onay, tamamlanan işlem ve servis listelerinin tümü başlığa tıklanarak sıralanır, sütun filtreleriyle süzülür. Müşteri listesinde sıralama/filtre sunucuda uygulanır (liste sayfalı).
 - Müşteri türü Vega özel kod 1'den (`KOD1`) okunur. Anlaşmalı yazım türevleri otomatik 12 aya düşer; yalnız yeni müşteriye 1-12 ay süre verilir.
 - Vega'daki kart değişikliği (tür, sözleşme tarihi, aktif/pasif) 15 sn'lik imza kontrolüyle yakalanır; açık ekran dakikada bir tazelenir. Pasif (`STATUS=2`) ve durumu boş kartlar listelenmez.
-- WhatsApp oturumu yalnız ortak ayarda seçilen ana bilgisayardadır. İstemciler mesajı `WHATSAPPMESAJLARI` kuyruğuna bırakır. Mesaj carinin en çok üç farklı cep numarasına gider (`TELEFONLAR`); gidenler `GONDERILENLER`'e yazılır ve tekrar gönderimde atlanır. Her ekranın üstünde bağlantı durumu ile oturumun açık olduğu kullanıcı ve bilgisayar görünür.
+- WhatsApp oturumu yalnız ortak ayarda seçilen ana bilgisayardadır. İstemciler mesajı `WHATSAPPMESAJLARI` kuyruğuna bırakır. Mesaj carinin en çok üç farklı cep numarasına gider (`TELEFONLAR`); gidenler `GONDERILENLER`'e yazılır ve tekrar gönderimde atlanır. Ana bilgisayarda pencere kapanınca uygulama sistem tepsisinde çalışmaya devam eder ve Windows açılışında `--arka-plan` ile gizli başlar; ana durumu sunucudan Electron'a IPC (`whatsapp-ana`) ile gelir. Her ekranın üstünde bağlantı durumu ile oturumun açık olduğu kullanıcı ve bilgisayar görünür.
 - Mesaj şablonunu herkes düzenler; onay bekleyen kaydın mesajı ayrıca düzenlenebilir ve başarısızsa yeniden gönderilir. 30 dakikada gönderilemeyen mesaj SQL Server saatine göre iptal edilir.
 - Kullanıcı isteğe bağlı 4-6 haneli PIN belirleyebilir. PIN'li kullanıcıya açılışta ve kullanıcı değiştirirken PIN sorulur; 5 yanlış denemede 1 dk kilit. Oturum yerel sunucunun belleğindedir, uygulama kapanınca düşer.
 - Servis kabulünde her cihaz için termal etiket basılır. Kayıtlar Serviste / Arızaya gönderilenler / Kargoya verilenler / Teslim / İptal sekmelerinde izlenir.
@@ -40,7 +40,7 @@ Eski ticket kolonları geçmiş veri uyumluluğu için korunur ancak arayüzde g
 
 ## Dağıtım
 
-- Kurulum: `dist\Vega Ticket Setup 1.6.0.exe`
+- Kurulum: `dist\Vega Ticket Setup 1.6.1.exe`
 - Kaynak depo: özel `saidbayraqtars/vega-ticket-sistem`.
 - Güncelleme deposu: açık `saidbayraqtars/vega-ticket-sistem-releases`.
 - Paketli uygulama `electron-updater` ile yeni sürümü indirir ve kullanıcı onayıyla kurar.

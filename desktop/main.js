@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { fork } = require("child_process");
 const path = require("path");
@@ -16,6 +16,31 @@ let sunucu = null;
 let pencere = null;
 const tekOrnek = app.requestSingleInstanceLock();
 
+// WhatsApp ana bilgisayarında pencere kapanınca uygulama tepside çalışmaya
+// devam eder; kuyruktaki mesajları gönderen sunucu bu süreçte yaşar. Windows
+// açılışında da "--arka-plan" ile gizli başlatılır.
+const ARKA_PLAN_ARGUMANI = "--arka-plan";
+const arkaPlanBaslangic = process.argv.includes(ARKA_PLAN_ARGUMANI);
+let whatsappAna = false;
+let gizliBekliyor = arkaPlanBaslangic;
+let tepsi = null;
+let tepsiBilgisiGosterildi = false;
+let bekleyenGuncelleme = null;
+const sunucuYenidenBaslatmalari = [];
+
+async function guncellemeSor(bilgi) {
+  const sonuc = await dialog.showMessageBox(pencere, {
+    type: "info",
+    title: "Güncelleme hazır",
+    message: `Vega Ticket ${bilgi.version} indirildi.`,
+    detail: "Yeni sürümü kurmak için uygulama yeniden başlatılacak.",
+    buttons: ["Şimdi yeniden başlat", "Daha sonra"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (sonuc.response === 0) autoUpdater.quitAndInstall(false, true);
+}
+
 function guncellemeSisteminiKur() {
   if (gelistirme) return;
   autoUpdater.autoDownload = true;
@@ -23,17 +48,15 @@ function guncellemeSisteminiKur() {
   autoUpdater.on("error", (err) => console.error(`[update] ${err.message}`));
   autoUpdater.on("update-available", (bilgi) => console.log(`[update] ${bilgi.version} indiriliyor`));
   autoUpdater.on("update-not-available", () => console.log("[update] güncel sürüm kullanılıyor"));
-  autoUpdater.on("update-downloaded", async (bilgi) => {
-    const sonuc = await dialog.showMessageBox(pencere, {
-      type: "info",
+  autoUpdater.on("update-downloaded", (bilgi) => {
+    // Tepsideyken görünmez pencereye diyalog açılmaz; pencere açılınca sorulur.
+    if (pencere?.isVisible()) return guncellemeSor(bilgi);
+    bekleyenGuncelleme = bilgi;
+    tepsi?.displayBalloon({
+      iconType: "info",
       title: "Güncelleme hazır",
-      message: `Vega Ticket ${bilgi.version} indirildi.`,
-      detail: "Yeni sürümü kurmak için uygulama yeniden başlatılacak.",
-      buttons: ["Şimdi yeniden başlat", "Daha sonra"],
-      defaultId: 0,
-      cancelId: 1,
+      content: `Vega Ticket ${bilgi.version} indirildi. Programı açınca kurulabilir.`,
     });
-    if (sonuc.response === 0) autoUpdater.quitAndInstall(false, true);
   });
   setTimeout(() => autoUpdater.checkForUpdates().catch((err) => console.error(`[update] ${err.message}`)), 5000);
 }
@@ -46,16 +69,116 @@ function sunucuBaslat() {
       PORT: String(PORT),
       // config.json kullanıcı profiline yazılır; kurulum klasörü yazılabilir olmayabilir
       VEGA_TICKET_BASE_DIR: app.getPath("userData"),
+      // Sunucu WhatsApp ana bilgisayarı durumunu IPC ile bildirir.
+      VEGA_TICKET_ELECTRON: "1",
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   sunucu.stdout?.on("data", (d) => process.stdout.write(`[server] ${d}`));
   sunucu.stderr?.on("data", (d) => process.stderr.write(`[server] ${d}`));
-  sunucu.on("exit", (kod) => {
-    if (kod !== 0 && !app.isQuitting) {
-      dialog.showErrorBox("Sunucu durdu", `Arka plan servisi ${kod} koduyla kapandı.`);
-    }
+  sunucu.on("message", (mesaj) => {
+    if (mesaj?.tip === "whatsapp-ana") anaDurumuAyarla(Boolean(mesaj.ana));
   });
+  sunucu.on("exit", (kod) => {
+    if (kod === 0 || app.isQuitting) return;
+    // Tepsideki ana bilgisayarda kimse hata kutusunu görmez; mesaj gönderimi
+    // durmasın diye sunucu kendiliğinden yeniden başlatılır. Sürekli çöküyorsa
+    // döngüye girmeden kullanıcıya bildirilir.
+    const simdi = Date.now();
+    while (sunucuYenidenBaslatmalari.length && simdi - sunucuYenidenBaslatmalari[0] > 10 * 60 * 1000) {
+      sunucuYenidenBaslatmalari.shift();
+    }
+    if (sunucuYenidenBaslatmalari.length < 5) {
+      sunucuYenidenBaslatmalari.push(simdi);
+      console.error(`[server] ${kod} koduyla kapandı, yeniden başlatılıyor`);
+      setTimeout(() => { if (!app.isQuitting) sunucuBaslat(); }, 3000);
+      return;
+    }
+    dialog.showErrorBox("Sunucu durdu", `Arka plan servisi ${kod} koduyla kapandı.`);
+  });
+}
+
+function anaDurumuAyarla(ana) {
+  whatsappAna = ana;
+  if (!gelistirme) {
+    // Ana bilgisayar yeniden başlatılsa da mesaj gönderimi kendiliğinden sürsün.
+    app.setLoginItemSettings({ openAtLogin: ana, args: [ARKA_PLAN_ARGUMANI] });
+  }
+  // Windows açılışında gizli başlayıp ana olmadığı anlaşılan uygulama kapanır.
+  if (!ana && gizliBekliyor && !pencere?.isVisible()) {
+    app.quit();
+    return;
+  }
+  tepsiDurumunuGuncelle();
+}
+
+function pencereyiGoster() {
+  if (!pencere) return;
+  gizliBekliyor = false;
+  if (pencere.isMinimized()) pencere.restore();
+  pencere.show();
+  pencere.focus();
+  tepsiDurumunuGuncelle();
+  if (bekleyenGuncelleme) {
+    const bilgi = bekleyenGuncelleme;
+    bekleyenGuncelleme = null;
+    guncellemeSor(bilgi);
+  }
+}
+
+async function tamamenKapat() {
+  if (whatsappAna) {
+    const sonuc = await dialog.showMessageBox({
+      type: "warning",
+      title: "Vega Ticket kapatılsın mı?",
+      message: "Bu bilgisayar WhatsApp ana bilgisayarı.",
+      detail: "Program yeniden açılana kadar WhatsApp mesajları gönderilmez.",
+      buttons: ["Tamamen kapat", "Vazgeç"],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (sonuc.response !== 0) return;
+  }
+  app.quit();
+}
+
+async function tepsiSimgesi() {
+  try {
+    return await app.getFileIcon(process.execPath, { size: "small" });
+  } catch {
+    return nativeImage.createEmpty();
+  }
+}
+
+let tepsiHazirlaniyor = false;
+async function tepsiDurumunuGuncelle() {
+  const gerekli = whatsappAna || gizliBekliyor;
+  if (!gerekli) {
+    tepsi?.destroy();
+    tepsi = null;
+    return;
+  }
+  if (!tepsi) {
+    if (tepsiHazirlaniyor) return;
+    tepsiHazirlaniyor = true;
+    try {
+      tepsi = new Tray(await tepsiSimgesi());
+    } finally {
+      tepsiHazirlaniyor = false;
+    }
+    tepsi.setToolTip("Vega Ticket");
+    tepsi.on("click", pencereyiGoster);
+    tepsi.on("double-click", pencereyiGoster);
+  }
+  tepsi.setContextMenu(Menu.buildFromTemplate([
+    { label: "Vega Ticket'ı aç", click: pencereyiGoster },
+    {
+      label: whatsappAna ? "WhatsApp mesajları bu bilgisayardan gönderiliyor" : "WhatsApp ana bilgisayarı değil",
+      enabled: false,
+    },
+    { type: "separator" },
+    { label: "Tamamen kapat", click: tamamenKapat },
+  ]));
 }
 
 /** Sunucu ayağa kalkana kadar /api/saglik yoklanır. */
@@ -99,7 +222,26 @@ function pencereOlustur() {
     },
   });
   pencere.removeMenu();
-  pencere.once("ready-to-show", () => pencere.show());
+  pencere.once("ready-to-show", () => {
+    if (!arkaPlanBaslangic) pencere.show();
+  });
+  pencere.on("close", (olay) => {
+    if (app.isQuitting || !whatsappAna) return;
+    olay.preventDefault();
+    pencere.hide();
+    gizliBekliyor = true;
+    tepsiDurumunuGuncelle();
+    if (!tepsiBilgisiGosterildi) {
+      tepsiBilgisiGosterildi = true;
+      tepsi?.displayBalloon({
+        iconType: "info",
+        title: "Vega Ticket arka planda çalışıyor",
+        content: "WhatsApp mesajları gönderilmeye devam edecek. Açmak veya tamamen kapatmak için bu simgeyi kullanın.",
+      });
+    }
+  });
+  // Windows oturumu kapanırken gizleme kapanışı engellemesin.
+  pencere.on("session-end", () => { app.isQuitting = true; });
 
   // Dış bağlantılar varsayılan tarayıcıda açılsın
   pencere.webContents.setWindowOpenHandler(({ url }) => {
@@ -120,13 +262,13 @@ function pencereOlustur() {
 if (!tekOrnek) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (!pencere) return;
-    if (pencere.isMinimized()) pencere.restore();
-    pencere.focus();
+  app.on("second-instance", (_olay, argv) => {
+    if (argv.includes(ARKA_PLAN_ARGUMANI)) return;
+    pencereyiGoster();
   });
 
   app.whenReady().then(async () => {
+    if (arkaPlanBaslangic) tepsiDurumunuGuncelle();
     sunucuBaslat();
     try {
       await sunucuyuBekle();

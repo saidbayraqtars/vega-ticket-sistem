@@ -46,6 +46,20 @@ const yerelKullanici = () => String(cfg.readConfig()?.kullanici || "").trim().sl
 const buMakineAna = (ayar) =>
   Boolean(ayar?.ANAMAKINE && ayar.ANAMAKINE.toLocaleLowerCase("tr-TR") === MAKINE.toLocaleLowerCase("tr-TR"));
 
+/**
+ * Electron ana süreci bu bilgisayar ana makineyse pencere kapanınca uygulamayı
+ * sistem tepsisinde çalışır bırakır. HTTP yerine IPC: PIN'li kullanıcıda API
+ * uçları oturum ister, ana süreç ise oturum taşımaz.
+ */
+let sonBildirilenAna = null;
+function anaDurumuBildir(ana) {
+  if (!process.env.VEGA_TICKET_ELECTRON || typeof process.send !== "function" || sonBildirilenAna === ana) return;
+  sonBildirilenAna = ana;
+  try {
+    process.send({ tip: "whatsapp-ana", ana });
+  } catch { /* Electron'suz (geliştirme) çalışmada kanal yok */ }
+}
+
 async function anaMakineYap(kullanici) {
   await db.ticket().request()
     .input("makine", sql.NVarChar(128), MAKINE)
@@ -167,6 +181,7 @@ async function dongu() {
   try {
     if (!db.bagliMi()) return planla(5000);
     const ayar = await ayarAl();
+    anaDurumuBildir(buMakineAna(ayar));
     if (!buMakineAna(ayar)) {
       if (yerelOturumAcik) whatsapp.kapat();
       yerelOturumAcik = false;
