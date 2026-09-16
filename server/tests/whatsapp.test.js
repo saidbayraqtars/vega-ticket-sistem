@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeTelefon, cariTelefonu } = require("../lib/telefon");
+const { normalizeTelefon, telefonKolonuMu, telefonKolonlariniSirala, cariTelefonu } = require("../lib/telefon");
 const { MESAJ_PENCERESI_DAKIKA, SURESI_DOLDU, SURE_HATASI, mesajOlustur, mesajMetniCevir, mesajSablonuDogrula, mesajSablonuDoldur, mesajPenceresiAcik, bildirimGonder, disaAktar } = require("../lib/whatsappBildirim");
 const whatsappWorker = require("../lib/whatsappWorker");
 
@@ -14,6 +14,16 @@ test("Türkiye cep telefonları WhatsApp biçimine çevrilir", () => {
 test("Cari telefonunda GSM, TELEFON1 alanından önce gelir", () => {
   assert.equal(cariTelefonu({ GSM: "0544 111 22 33", TELEFON1: "0532 999 88 77" }), "905441112233");
   assert.equal(cariTelefonu({ GSM: "", TELEFON1: "0532 999 88 77" }), "905329998877");
+});
+
+test("Vega cari telefon kolonları keşfedilir ve TELEFON2/3 yedekleri kullanılır", () => {
+  assert.deepEqual(
+    telefonKolonlariniSirala(["FAKS", "TELEFON3", "YTELEFON1", "TELEFON1", "TELEFON2", "KEFILTELEFON"]),
+    ["TELEFON1", "TELEFON2", "TELEFON3", "YTELEFON1"]
+  );
+  assert.equal(telefonKolonuMu("FAKS"), false);
+  assert.equal(cariTelefonu({ TELEFON1: "0362 111 22 33", TELEFON2: "0533 222 33 44" }), "905332223344");
+  assert.equal(cariTelefonu({ TELEFON3: "0544 555 66 77" }), "905445556677");
 });
 
 test("WhatsApp metni yapılan işlemi ve uzak bağlantı bilgisini içerir", () => {
@@ -96,4 +106,48 @@ test("kalp atışı tazelik penceresi boştaki yoklama aralığından geniştir"
   // Döngü boşta BOSTA_MS'de bir kalp atışı yazıyor. Tazelik penceresi bunun
   // altına düşerse istemciler ana makineyi boş yere "ulaşılamıyor" gösterir.
   assert.ok(whatsappWorker.YOKLAMA_TAZE_MS > whatsappWorker.BOSTA_MS * 2);
+});
+
+test("bildirim carinin farklı en çok üç cep numarasına gider", () => {
+  const { cariTelefonlari } = require("../lib/telefon");
+  assert.deepEqual(
+    cariTelefonlari({
+      TELEFON1: "0362 111 22 33 / 0532 111 22 33",
+      TELEFON2: "0533 222 33 44",
+      TELEFON3: "+90 532 111 22 33",
+      YGSM: "0544 555 66 77",
+      YTELEFON1: "0505 999 88 77",
+    }),
+    ["905321112233", "905332223344", "905445556677"]
+  );
+  assert.deepEqual(cariTelefonlari({ TELEFON1: "0362 111 22 33" }), []);
+});
+
+test("çok numaralı kuyruk kaydı istemciye numaralarıyla döner", () => {
+  const sonuc = disaAktar({ TICKETID: 1, DURUM: "GONDERILDI", TELEFON: "905321112233", TELEFONLAR: "905321112233,905332223344" });
+  assert.deepEqual(sonuc.telefonlar, ["905321112233", "905332223344"]);
+  assert.match(sonuc.mesaj, /2 numaraya/);
+  // Eski sürümün yazdığı tek numaralı kayıt da okunur.
+  assert.deepEqual(disaAktar({ TICKETID: 2, DURUM: "BEKLIYOR", TELEFON: "905321112233" }).telefonlar, ["905321112233"]);
+});
+
+test("yarıda kalan gönderim tekrarlanınca mesaj giden numaraya ikinci kez gitmez", async () => {
+  const gidenler = [];
+  const ilerlemeler = [];
+  const mesaj = { ID: 7, METIN: "Merhaba", TELEFONLAR: "905321112233,905332223344,905445556677", GONDERILENLER: "905321112233" };
+  const gonder = async (telefon) => {
+    gidenler.push(telefon);
+    return telefon === "905445556677" ? { gonderildi: false, mesaj: "Bu numara WhatsApp kullanmıyor." } : { gonderildi: true, mesajId: "m1" };
+  };
+  const sonuc = await whatsappWorker.mesajiGonder(mesaj, gonder, async (_id, liste) => ilerlemeler.push([...liste]));
+  assert.deepEqual(gidenler, ["905332223344", "905445556677"]);
+  assert.deepEqual(ilerlemeler, [["905321112233", "905332223344"]]);
+  assert.equal(sonuc.gonderildi, false);
+  assert.match(sonuc.mesaj, /2\/3 numaraya gönderildi/);
+  assert.match(sonuc.mesaj, /0544/);
+
+  const tamam = await whatsappWorker.mesajiGonder({ ...mesaj, GONDERILENLER: "905321112233,905332223344" }, async () => ({ gonderildi: true, mesajId: "m2" }), async () => {});
+  assert.deepEqual(tamam, { gonderildi: true, mesajId: "m2" });
+  const numarasiz = await whatsappWorker.mesajiGonder({ ID: 8, METIN: "x" }, gonder, async () => {});
+  assert.equal(numarasiz.gonderildi, false);
 });

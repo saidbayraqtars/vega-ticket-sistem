@@ -60,11 +60,17 @@ const CARI_FILTRE = `ISNULL(C.DELETED, 0) = 0 AND C.STATUS = 1 AND C.IND >= 100`
  * veya aktif/pasif değişince önbellek TTL'yi beklemeden tazelensin diye.
  * GUNCELLEMETARIHI her Vega sürümünde yok; CHECKSUM kolon adından bağımsız.
  */
-const kartImzasiSorgusu = (tablo) => `
+const kartImzasiSorgusu = (tablo, telefonKolonlari = []) => {
+  const kolonAdi = (kolon) => "[" + String(kolon).replaceAll("]", "]]") + "]";
+  const telefonlar = telefonKolonlari
+    .map((kolon) => `C.${kolonAdi(kolon)}`)
+    .join(", ");
+  return `
   SELECT COUNT(*) AS ADET,
     CHECKSUM_AGG(CHECKSUM(C.IND, C.FIRMAKODU, C.FIRMAADI, C.UNVAN, C.KOD1, C.FAKS,
-      C.STATUS, C.DELETED, C.YGSM, C.TELEFON1, C.YETKILI)) AS IMZA
+      C.STATUS, C.DELETED, C.YETKILI${telefonlar ? `, ${telefonlar}` : ""})) AS IMZA
   FROM [${tablo}] C`;
+};
 
 async function firmaDonemListesi(pool) {
   const firmalar = (

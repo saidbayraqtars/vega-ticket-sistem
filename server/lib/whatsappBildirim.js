@@ -1,6 +1,6 @@
 const sql = require("mssql");
 const db = require("./db");
-const { cariTelefonu } = require("./telefon");
+const { cariTelefonlari } = require("./telefon");
 
 const MESAJ_PENCERESI_DAKIKA = 30;
 const MESAJ_PENCERESI_MS = MESAJ_PENCERESI_DAKIKA * 60 * 1000;
@@ -50,15 +50,20 @@ function mesajPenceresiAcik(kayitTarihi, simdi = new Date()) {
   return gecen >= 0 && gecen < MESAJ_PENCERESI_MS;
 }
 
+/** "905..,905.." kuyruk alanını diziye çevirir. */
+const telefonListesi = (deger) => String(deger || "").split(",").map((x) => x.trim()).filter(Boolean);
+
 function disaAktar(row) {
   if (!row) return null;
   const durum = row.DURUM;
   const gonderildi = durum === "GONDERILDI";
   const sirada = durum === "BEKLIYOR" || durum === "GONDERILIYOR";
   const iptal = durum === "IPTAL";
+  const telefonlar = telefonListesi(row.TELEFONLAR || row.TELEFON);
+  const numara = telefonlar.length > 1 ? `${telefonlar.length} numaraya ` : "";
   let mesaj = row.SONHATA;
-  if (gonderildi) mesaj = "WhatsApp mesajı ana bilgisayardan gönderildi.";
-  else if (sirada) mesaj = "WhatsApp mesajı ana bilgisayarda gönderim sırasına alındı.";
+  if (gonderildi) mesaj = `WhatsApp mesajı ana bilgisayardan ${numara}gönderildi.`;
+  else if (sirada) mesaj = `WhatsApp mesajı ana bilgisayarda ${numara}gönderim sırasına alındı.`;
   else if (iptal) mesaj = `WhatsApp mesajı ${MESAJ_PENCERESI_DAKIKA} dakika içinde gönderilemediği için iptal edildi.`;
   else mesaj ||= "WhatsApp mesajı gönderilemedi.";
   return {
@@ -68,6 +73,8 @@ function disaAktar(row) {
     sirada,
     iptal,
     telefon: row.TELEFON || null,
+    telefonlar,
+    gonderilenler: telefonListesi(row.GONDERILENLER),
     mesajId: row.MESAJID || null,
     mesaj,
     deneme: Number(row.DENEME || 0),
@@ -76,7 +83,7 @@ function disaAktar(row) {
   };
 }
 
-const MESAJ_SUTUNLARI = `TICKETID, TELEFON, METIN, DURUM, DENEME, MESAJID, SONHATA, GONDERIMTARIHI`;
+const MESAJ_SUTUNLARI = `TICKETID, TELEFON, TELEFONLAR, GONDERILENLER, METIN, DURUM, DENEME, MESAJID, SONHATA, GONDERIMTARIHI`;
 
 // Pencerenin kesin sınırı SQL Server saatiyle uygulanır; istemci saati yetkili değil.
 const SURESI_DOLDU = `DATEADD(MINUTE, ${MESAJ_PENCERESI_DAKIKA}, KAYITTARIHI) <= GETDATE()`;
@@ -95,6 +102,7 @@ async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTa
       sirada: false,
       iptal: true,
       telefon: null,
+      telefonlar: [],
       mesaj: `WhatsApp mesajı, işlem kaydından sonraki ${MESAJ_PENCERESI_DAKIKA} dakika içinde gönderilemediği için iptal edildi.`,
     };
   }
@@ -104,7 +112,8 @@ async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTa
   const mesajMetni = mesajMetniCevir(metin, islem);
   if (!mesajMetni) throw new Error("WhatsApp mesajı 1-1000 karakter olmalı.");
 
-  const telefon = cariTelefonu(kart);
+  const telefonlar = cariTelefonlari(kart);
+  const telefon = telefonlar[0] || "";
   const ilkDurum = telefon ? "BEKLIYOR" : "HATA";
   const ilkHata = telefon ? null : "Caride WhatsApp'a uygun cep telefonu bulunamadı.";
   const r = await db.ticket().request()
@@ -113,6 +122,7 @@ async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTa
     .input("donem", sql.NVarChar(4), String(donemNo))
     .input("cari", sql.Int, Number(kart.IND))
     .input("telefon", sql.NVarChar(20), telefon || null)
+    .input("telefonlar", sql.NVarChar(100), telefonlar.join(",") || null)
     .input("metin", sql.NVarChar(1000), mesajMetni)
     .input("kayit", sql.DateTime, kayitTarihi)
     .input("durum", sql.NVarChar(20), ilkDurum)
@@ -122,13 +132,13 @@ async function bildirimGonder(kart, islem, { ticketId, firmaNo, donemNo, kayitTa
       -- GONDERILIYOR satırı ana makinenin elindedir; ezersek sonuç kaybolur ve
       -- mesaj ikinci kez gönderilir. Yalnız sahipsiz satırlar tazelenir.
       WHEN MATCHED AND H.DURUM IN ('BEKLIYOR', 'HATA') THEN UPDATE SET
-        TELEFON = @telefon, METIN = @metin,
+        TELEFON = @telefon, TELEFONLAR = @telefonlar, METIN = @metin,
         DURUM = CASE WHEN ${SURESI_DOLDU_PARAM} THEN 'IPTAL' ELSE @durum END,
         SONHATA = CASE WHEN ${SURESI_DOLDU_PARAM} THEN '${SURE_HATASI}' ELSE @hata END,
         GUNCELLEMETARIHI = GETDATE()
       WHEN NOT MATCHED THEN INSERT
-        (TICKETID, FIRMANO, DONEMNO, CARIIND, TELEFON, METIN, KAYITTARIHI, DURUM, SONHATA)
-        VALUES (@ticket, @firma, @donem, @cari, @telefon, @metin, @kayit,
+        (TICKETID, FIRMANO, DONEMNO, CARIIND, TELEFON, TELEFONLAR, METIN, KAYITTARIHI, DURUM, SONHATA)
+        VALUES (@ticket, @firma, @donem, @cari, @telefon, @telefonlar, @metin, @kayit,
           CASE WHEN ${SURESI_DOLDU_PARAM} THEN 'IPTAL' ELSE @durum END,
           CASE WHEN ${SURESI_DOLDU_PARAM} THEN '${SURE_HATASI}' ELSE @hata END);
 
@@ -159,6 +169,7 @@ module.exports = {
   mesajSablonuDoldur,
   mesajMetniCevir,
   mesajPenceresiAcik,
+  telefonListesi,
   disaAktar,
   bildirimGonder,
   mesajDurumu,

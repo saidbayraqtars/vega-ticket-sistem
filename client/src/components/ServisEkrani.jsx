@@ -320,7 +320,7 @@ function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, mesgul, onKayd
             </div>
           ) : (
             <Arama firmaNo={firmaNo} donemNo={donemNo}
-              onSec={(k) => setYeni((o) => ({ ...o, cari: k, telefon: k.GSM || k.TELEFON1 || "", yetkili: k.YETKILI || "" }))} />
+              onSec={(k) => setYeni((o) => ({ ...o, cari: k, telefon: k.TELEFON || k.GSM || k.TELEFON1 || "", yetkili: k.YETKILI || "" }))} />
           )}
           {yeni.cari && (
             <div className="mt-3 grid grid-cols-3 gap-2">

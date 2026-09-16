@@ -34,9 +34,20 @@ app.use(
 );
 app.use(express.json({ limit: "2mb" }));
 
+// Arayüz Türkçe karakterler başlıkta taşınabilsin diye adı URL-kodlu gönderir.
+// Bozuk kodlamada (eski istemci, elle yazılmış "%") ham değer kullanılır.
+const basliktanCoz = (deger) => {
+  try {
+    return decodeURIComponent(deger);
+  } catch {
+    return deger;
+  }
+};
+
 // Kim işlem yapıyor — Electron her istekte gönderir, yoksa config'teki ad.
 app.use((req, res, next) => {
-  req.kullanici = String(req.header("x-kullanici") || cfg.readConfig()?.kullanici || "").trim();
+  const baslik = req.header("x-kullanici");
+  req.kullanici = String((baslik && basliktanCoz(baslik)) || cfg.readConfig()?.kullanici || "").trim();
   next();
 });
 

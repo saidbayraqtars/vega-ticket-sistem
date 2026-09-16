@@ -3,7 +3,7 @@ const sql = require("mssql");
 const db = require("../lib/db");
 const vega = require("../lib/vega");
 const cariCache = require("../lib/cariCache");
-const { cariTelefonu } = require("../lib/telefon");
+const { cariTelefonDegeri, cariTelefonu, telefonKolonlariniSirala } = require("../lib/telefon");
 const { rvCevir } = require("../lib/ticketKurallari");
 
 const router = express.Router();
@@ -134,7 +134,7 @@ async function mevcutKolonlar(pool, tablo, adaylar) {
     kolonBellek.set(tablo, new Set(r.recordset.map((x) => String(x.COLUMN_NAME).toUpperCase())));
   }
   const varOlan = kolonBellek.get(tablo);
-  return adaylar.filter((k) => varOlan.has(k));
+  return adaylar ? adaylar.filter((k) => varOlan.has(k)) : [...varOlan];
 }
 
 const metinAl = (satir, kolon) => String(satir?.[kolon] ?? "").replace(/\r\n?/g, "\n").trim();
@@ -301,8 +301,9 @@ router.get("/:id/musteri-adres", async (req, res, next) => {
     const pool = db.vega();
     const tablo = vega.kartTablosu(kayit.FIRMANO, "CARI");
     await vega.tabloDogrula(pool, tablo);
+    const telefonKolonlari = telefonKolonlariniSirala(await mevcutKolonlar(pool, tablo));
     const kolonlar = await mevcutKolonlar(pool, tablo,
-      ["ADRESSEVK", "ADRESFATURA", "ADRESPOSTA", "IL", "SEHIR", "POSTAKODU", "YETKILI", "YGSM", "TELEFON1"]);
+      ["ADRESSEVK", "ADRESFATURA", "ADRESPOSTA", "IL", "SEHIR", "POSTAKODU", "YETKILI", ...telefonKolonlari]);
     if (kolonlar.length) {
       // ADRES* kolonları ntext; LTRIM ntext kabul etmediği için önce çevrilir.
       const secim = kolonlar.map((c) => `LTRIM(RTRIM(ISNULL(CAST(C.[${c}] AS NVARCHAR(1000)), ''))) AS [${c}]`);
@@ -314,7 +315,7 @@ router.get("/:id/musteri-adres", async (req, res, next) => {
         adres.ALICIIL = benzersizBirlestir([metinAl(c, "SEHIR"), metinAl(c, "IL")], " / ")
           + (metinAl(c, "POSTAKODU") ? ` ${metinAl(c, "POSTAKODU")}` : "");
         adres.ALICIYETKILI ||= metinAl(c, "YETKILI");
-        adres.ALICITELEFON ||= metinAl(c, "YGSM") || metinAl(c, "TELEFON1");
+        adres.ALICITELEFON ||= cariTelefonDegeri(c);
       }
     }
     res.json({ ok: true, adres });
@@ -346,7 +347,7 @@ router.post("/", async (req, res, next) => {
     if (!kart) return res.status(404).json({ ok: false, mesaj: "Cari bulunamadı." });
     const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
     // Telefon elle verilmediyse Vega kartından alınır; etikette bu görünür.
-    const telefon = kirp(b.TELEFON, 40) || kart.GSM || kart.TELEFON1 || cariTelefonu(kart) || null;
+    const telefon = kirp(b.TELEFON, 40) || kart.TELEFON || cariTelefonDegeri(kart) || cariTelefonu(kart) || null;
 
     const islem = new sql.Transaction(db.ticket());
     await islem.begin();

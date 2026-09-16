@@ -27,6 +27,7 @@ function sahteIstek() {
           CARIIND: girdiler.cari,
           CARIADI: girdiler.cariadi,
           BASLIK: girdiler.baslik,
+          ACIKLAMA: girdiler.aciklama,
           DURUM: "ONAY_BEKLIYOR",
           ACILISTARIHI: new Date("2026-09-08T10:00:00+03:00"),
           KAPANISTARIHI: null,
@@ -87,14 +88,17 @@ test("yeni ticket onay beklerken düzenlenen WhatsApp metni hemen kuyruğa alın
     kullanici: "Said",
     body: {
       FIRMANO: "103", DONEMNO: "1", CARIIND: 9,
-      BASLIK: "Yazıcı kuruldu", UCRET: "250", WHATSAPPSABLONU: "Sayın {firma}, {islem}: {ucret} TL",
+      BASLIK: "Yazıcı kuruldu", ACIKLAMA: "Parola yenilendi; tekrar kontrol edilecek.",
+      UCRET: "250", WHATSAPPSABLONU: "Sayın {firma}, {islem}: {ucret} TL",
     },
   });
 
   assert.equal(sonuc.durum, 201);
   assert.equal(sonuc.govde.kayit.DURUM, "ONAY_BEKLIYOR");
+  assert.equal(sonuc.govde.kayit.ACIKLAMA, "Parola yenilendi; tekrar kontrol edilecek.");
   assert.equal(whatsappCagrilari.length, 1);
   assert.equal(whatsappCagrilari[0][2].metin, "Sayın Test Cari, Yazıcı kuruldu: 250,00 TL");
+  assert.doesNotMatch(whatsappCagrilari[0][2].metin, /Parola yenilendi/);
   assert.equal(whatsappCagrilari[0][2].kayitTarihi, sonuc.govde.kayit.ACILISTARIHI);
   assert.equal(uyandirma, 1);
 });

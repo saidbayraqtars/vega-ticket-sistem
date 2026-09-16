@@ -4,6 +4,7 @@
  * sayfalandığı için filtre de burada uygulanır; istemci yalnız sayfayı görür.
  */
 const { normalize } = require("./arama");
+const { cariTelefonMetni } = require("./telefon");
 
 const trSirala = new Intl.Collator("tr", { sensitivity: "base", numeric: true });
 
@@ -67,7 +68,7 @@ function filtrele(liste, f) {
     if (f.kod && !normalize(r.FIRMAKODU).includes(f.kod)) return false;
     if (f.ad && !normalize(r.AD).includes(f.ad)) return false;
     if (f.metin) {
-      const hedef = normalize(`${r.FIRMAKODU} ${r.AD} ${r.YETKILI || ""} ${r.GSM || ""} ${r.TELEFON1 || ""}`);
+      const hedef = normalize(`${r.FIRMAKODU} ${r.AD} ${r.YETKILI || ""} ${cariTelefonMetni(r)}`);
       if (!f.metin.split(" ").every((parca) => hedef.includes(parca))) return false;
     }
     return true;

@@ -22,7 +22,8 @@ const waKodu = (k) => {
 const SUTUNLAR = [
   { anahtar: "ACILISTARIHI", baslik: "Kayıt zamanı", genislik: 135, deger: (k) => tarihDegeri(k.ACILISTARIHI), metin: (k) => tarihSaat(k.ACILISTARIHI) },
   { anahtar: "CARIADI", baslik: "Müşteri", genislik: 240 },
-  { anahtar: "BASLIK", baslik: "Yapılan işlem", genislik: 330 },
+  { anahtar: "BASLIK", baslik: "Müşteriye iletilen işlem", genislik: 300 },
+  { anahtar: "ACIKLAMA", baslik: "Şirket içi not", genislik: 300 },
   { anahtar: "UCRET", baslik: "Söylenen ücret", genislik: 120, deger: (k) => Number(k.UCRET || 0), metin: (k) => tl(k.UCRET) },
   { anahtar: "OLUSTURAN", baslik: "Kaydeden", genislik: 100 },
   { anahtar: "WHATSAPP", baslik: "WhatsApp durumu", genislik: 150, tip: "secim", deger: waKodu,
@@ -107,6 +108,7 @@ export default function OnayBekleyenler({ firmaNo, tetik, onOnaylandi }) {
                 <td>{tarihSaat(k.ACILISTARIHI)}</td>
                 <td title={k.CARIADI}>{k.CARIADI}</td>
                 <td title={k.BASLIK}>{k.BASLIK}</td>
+                <td title={k.ACIKLAMA || ""}>{k.ACIKLAMA || "—"}</td>
                 <td className="sayi">{tl(k.UCRET)} ₺</td>
                 <td>{k.OLUSTURAN}</td>
                 <td title={k.WHATSAPPHATA || ""}>

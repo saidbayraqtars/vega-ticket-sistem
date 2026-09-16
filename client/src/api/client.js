@@ -24,7 +24,9 @@ async function istek(yol, secenekler = {}) {
     ...secenekler,
     headers: {
       "Content-Type": "application/json",
-      ...(kullanici ? { "x-kullanici": kullanici } : {}),
+      // HTTP başlıkları yalnız ISO-8859-1 taşır; Türkçe karakterli ad
+      // (Ş, ğ, İ...) ham gönderilirse fetch hata fırlatır. Sunucu çözer.
+      ...(kullanici ? { "x-kullanici": encodeURIComponent(kullanici) } : {}),
       ...(oturum ? { "x-oturum": oturum } : {}),
       ...(secenekler.headers || {}),
     },

@@ -8,6 +8,7 @@ const cariListe = require("../lib/cariListe");
 const { hesaplaMusteriSuresi } = require("../lib/musteriSuresi");
 const { normalizeTur, TUR_YENI } = require("../lib/sozlesme");
 const { tarihCevir } = require("../lib/ticketKurallari");
+const { cariTelefonlari } = require("../lib/telefon");
 
 const router = express.Router();
 
@@ -215,11 +216,12 @@ router.get("/:ind", async (req, res, next) => {
     ]);
     const hamKart = rows.find((r) => r.IND === ind);
     if (!hamKart) return res.status(404).json({ ok: false, mesaj: "Cari bulunamadı." });
-    const kart = zenginlestir(hamKart, sureler);
+    // İşlem kaydındaki WhatsApp bildiriminin gideceği numaralar.
+    const kart = { ...zenginlestir(hamKart, sureler), whatsappTelefonlari: cariTelefonlari(hamKart) };
     const t = await db.ticket().request()
       .input("firma", sql.NVarChar(4), firmaNo)
       .input("cari", sql.Int, ind).query(`
-        SELECT TOP 200 ID, BASLIK, UCRET, KAPANISTARIHI, OLUSTURAN, RV
+        SELECT TOP 200 ID, BASLIK, ACIKLAMA, UCRET, KAPANISTARIHI, OLUSTURAN, RV
         FROM dbo.TICKETLER
         WHERE FIRMANO = @firma AND CARIIND = @cari AND SILINDI = 0 AND DURUM = 'KAPALI'
         ORDER BY KAPANISTARIHI DESC, ID DESC

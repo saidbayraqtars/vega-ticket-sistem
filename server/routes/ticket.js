@@ -15,7 +15,7 @@ const router = express.Router();
 const DURUMLAR = ["ONAY_BEKLIYOR", "KAPALI"];
 const ONCELIKLER = [];
 const UCRET_DURUMLARI = ["KAYIT"];
-const SUTUNLAR = `ID, FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, BASLIK,
+const SUTUNLAR = `ID, FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, BASLIK, ACIKLAMA,
   DURUM, ACILISTARIHI, KAPANISTARIHI, UCRET, WHATSAPPMETNI, ONAYLAYAN,
   ONAYTARIHI, OLUSTURAN, GUNCELLEYEN, GUNCELLEMETARIHI, SILINDI, RV`;
 const rvHex = (buf) => (buf ? Buffer.from(buf).toString("hex") : null);
@@ -104,8 +104,10 @@ router.post("/", async (req, res, next) => {
   try {
     const b = req.body || {};
     const baslik = String(b.BASLIK || "").trim();
+    const aciklama = String(b.ACIKLAMA || "").trim();
     if (!baslik) return res.status(400).json({ ok: false, mesaj: "Yapılan işlem zorunlu." });
     if (baslik.length > 200) return res.status(400).json({ ok: false, mesaj: "Yapılan işlem en fazla 200 karakter olabilir." });
+    if (aciklama.length > 1000) return res.status(400).json({ ok: false, mesaj: "Ofis içi not en fazla 1000 karakter olabilir." });
     if (!/^\d+$/.test(String(b.CARIIND ?? "")) || Number(b.CARIIND) < 1) {
       return res.status(400).json({ ok: false, mesaj: "Cari seçilmedi." });
     }
@@ -151,15 +153,16 @@ router.post("/", async (req, res, next) => {
       .input("carikodu", sql.NVarChar(50), kart.FIRMAKODU ?? null)
       .input("cariadi", sql.NVarChar(255), kart.AD ?? null)
       .input("baslik", sql.NVarChar(200), baslik)
+      .input("aciklama", sql.NVarChar(1000), aciklama || null)
       .input("whatsapp", sql.NVarChar(1000), whatsappMetni)
       .input("ucret", sql.Decimal(18, 2), ucret)
       .input("olusturan", sql.NVarChar(60), kullanici).query(`
         INSERT INTO dbo.TICKETLER
-          (FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, BASLIK,
+          (FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, BASLIK, ACIKLAMA,
            DURUM, ONCELIK, KAPANISTARIHI, OLUSTURAN, WHATSAPPMETNI,
            UCRET, UCRETDURUMU, SOZLESMEDURUMU)
         OUTPUT ${SUTUNLAR.split(",").map((s) => "INSERTED." + s.trim()).join(", ")}
-        VALUES (@firma, @donem, @cari, @carikodu, @cariadi, @baslik,
+        VALUES (@firma, @donem, @cari, @carikodu, @cariadi, @baslik, @aciklama,
                 'ONAY_BEKLIYOR', 'NORMAL', NULL, @olusturan, @whatsapp,
                 @ucret, 'KAYIT', NULL)
       `);
@@ -199,7 +202,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-/** Onaylanmış kayıtta yalnız yapılan işlem ve söylenen ücret düzenlenebilir. */
+/** Onaylanmış kayıtta müşteri işlemi, ofis notu ve söylenen ücret düzenlenebilir. */
 router.patch("/:id", async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -215,13 +218,19 @@ router.patch("/:id", async (req, res, next) => {
       setler.push("BASLIK = @baslik");
       istek.input("baslik", sql.NVarChar(200), baslik);
     }
+    if (Object.hasOwn(b, "ACIKLAMA")) {
+      const aciklama = String(b.ACIKLAMA || "").trim();
+      if (aciklama.length > 1000) return res.status(400).json({ ok: false, mesaj: "Ofis içi not en fazla 1000 karakter olabilir." });
+      setler.push("ACIKLAMA = @aciklama");
+      istek.input("aciklama", sql.NVarChar(1000), aciklama || null);
+    }
     if (Object.hasOwn(b, "UCRET")) {
       const ucret = ucretCevir(b.UCRET);
       if (ucret === null) return res.status(400).json({ ok: false, mesaj: "Söylenen ücret geçersiz." });
       setler.push("UCRET = @ucret");
       istek.input("ucret", sql.Decimal(18, 2), ucret);
     }
-    if (!setler.length) return res.status(400).json({ ok: false, mesaj: "Yalnız yapılan işlem veya söylenen ücret değiştirilebilir." });
+    if (!setler.length) return res.status(400).json({ ok: false, mesaj: "Yalnız müşteri işlemi, ofis içi not veya söylenen ücret değiştirilebilir." });
     const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
     setler.push("GUNCELLEYEN = @kullanici", "GUNCELLEMETARIHI = GETDATE()");
     istek.input("kullanici", sql.NVarChar(60), kullanici);

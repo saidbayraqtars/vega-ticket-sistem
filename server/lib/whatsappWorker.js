@@ -3,7 +3,7 @@ const sql = require("mssql");
 const db = require("./db");
 const cfg = require("./config");
 const whatsapp = require("./whatsapp");
-const { SURESI_DOLDU, SURE_HATASI } = require("./whatsappBildirim");
+const { SURESI_DOLDU, SURE_HATASI, telefonListesi } = require("./whatsappBildirim");
 
 const MAKINE = os.hostname().trim();
 // Kuyrukta iş varken hızlı, boştayken seyrek. Sabit 2 sn'de her tur 5 sorgu
@@ -16,7 +16,9 @@ const TEMIZLIK_ARALIGI_MS = 60000;
 // Kalp atışı boşta BOSTA_MS'de bir yazılıyor; tazelik penceresi bunun altında
 // kalırsa istemciler ana makineyi boş yere "ulaşılamıyor" gösterir.
 const YOKLAMA_TAZE_MS = BOSTA_MS * 3;
-// Baileys onWhatsApp + sendMessage her biri 60 sn'ye kadar bekleyebilir.
+// Baileys onWhatsApp + sendMessage her biri 60 sn'ye kadar bekleyebilir; bir
+// mesaj üç numaraya gittiği için her numaranın ilerlemesi ayrıca yazılır ve
+// GUNCELLEMETARIHI tazelenir.
 // Takılan talep eşiği bunun üstünde olmalı, yoksa uçuştaki mesaj kuyruğa geri
 // döner ve müşteriye ikinci kez gider.
 const TAKILDI_DAKIKA = 5;
@@ -98,9 +100,48 @@ async function siradakiMesajiAl() {
       ORDER BY ID
     )
     UPDATE Aday SET DURUM = 'GONDERILIYOR', DENEME = DENEME + 1, GUNCELLEMETARIHI = GETDATE()
-    OUTPUT INSERTED.ID, INSERTED.TELEFON, INSERTED.METIN;
+    OUTPUT INSERTED.ID, INSERTED.TELEFON, INSERTED.TELEFONLAR, INSERTED.GONDERILENLER, INSERTED.METIN;
   `);
   return r.recordset[0] || null;
+}
+
+/** Henüz mesaj gitmemiş numaralar; yarıda kalan gönderim tekrarlanınca gidenler atlanır. */
+function kalanAlicilar(mesaj) {
+  const gidenler = new Set(telefonListesi(mesaj.GONDERILENLER));
+  return telefonListesi(mesaj.TELEFONLAR || mesaj.TELEFON).filter((t) => !gidenler.has(t));
+}
+
+const okunurTelefon = (t) => (/^90\d{10}$/.test(t) ? `0${t.slice(2)}` : t);
+
+async function ilerlemeKaydet(id, gonderilenler) {
+  await db.ticket().request()
+    .input("id", sql.BigInt, id)
+    .input("gonderilenler", sql.NVarChar(100), gonderilenler.join(",")).query(`
+      UPDATE dbo.WHATSAPPMESAJLARI SET GONDERILENLER = @gonderilenler, GUNCELLEMETARIHI = GETDATE()
+      WHERE ID = @id AND DURUM = 'GONDERILIYOR'
+    `);
+}
+
+/** Mesajı kalan her numaraya sırayla gönderir; biri başarısızsa kayıt HATA olur. */
+async function mesajiGonder(mesaj, gonder = whatsapp.gonder, ilerleme = ilerlemeKaydet) {
+  const toplam = telefonListesi(mesaj.TELEFONLAR || mesaj.TELEFON).length;
+  if (!toplam) return { gonderildi: false, mesaj: "Caride WhatsApp'a uygun cep telefonu bulunamadı." };
+  const gonderilenler = telefonListesi(mesaj.GONDERILENLER);
+  const hatalar = [];
+  let mesajId = null;
+  for (const telefon of kalanAlicilar(mesaj)) {
+    const sonuc = await gonder(telefon, mesaj.METIN);
+    if (sonuc.gonderildi) {
+      gonderilenler.push(telefon);
+      mesajId = sonuc.mesajId || mesajId;
+      await ilerleme(mesaj.ID, gonderilenler);
+    } else {
+      hatalar.push(`${okunurTelefon(telefon)}: ${sonuc.mesaj}`);
+    }
+  }
+  if (!hatalar.length) return { gonderildi: true, mesajId };
+  const onEk = gonderilenler.length ? `${gonderilenler.length}/${toplam} numaraya gönderildi. Gönderilemeyen: ` : "";
+  return { gonderildi: false, mesajId, mesaj: onEk + hatalar.join(" · ") };
 }
 
 async function sonucuKaydet(id, sonuc) {
@@ -110,7 +151,7 @@ async function sonucuKaydet(id, sonuc) {
     .input("mesaj", sql.NVarChar(120), sonuc.mesajId || null)
     .input("hata", sql.NVarChar(1000), sonuc.gonderildi ? null : String(sonuc.mesaj || "Gönderilemedi.").slice(0, 1000)).query(`
       UPDATE dbo.WHATSAPPMESAJLARI SET
-        DURUM = @durum, MESAJID = @mesaj, SONHATA = @hata,
+        DURUM = @durum, MESAJID = ISNULL(@mesaj, MESAJID), SONHATA = @hata,
         GONDERIMTARIHI = CASE WHEN @durum = 'GONDERILDI' THEN GETDATE() ELSE NULL END,
         GUNCELLEMETARIHI = GETDATE()
       WHERE ID = @id AND DURUM = 'GONDERILIYOR'
@@ -149,7 +190,7 @@ async function dongu() {
         isVardi = true;
         ucustakiler.add(Number(mesaj.ID));
         try {
-          await sonucuKaydet(mesaj.ID, await whatsapp.gonder(mesaj.TELEFON, mesaj.METIN));
+          await sonucuKaydet(mesaj.ID, await mesajiGonder(mesaj));
         } finally {
           ucustakiler.delete(Number(mesaj.ID));
         }
@@ -214,4 +255,4 @@ function kapat() {
   whatsapp.kapat();
 }
 
-module.exports = { MAKINE, TAKILDI_DAKIKA, BOSTA_MS, YOKLAMA_TAZE_MS, ayarAl, buMakineAna, anaMakineYap, durumAl, baslat, uyandir, kapat };
+module.exports = { MAKINE, TAKILDI_DAKIKA, kalanAlicilar, mesajiGonder, BOSTA_MS, YOKLAMA_TAZE_MS, ayarAl, buMakineAna, anaMakineYap, durumAl, baslat, uyandir, kapat };

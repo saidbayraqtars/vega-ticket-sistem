@@ -6,6 +6,7 @@
  * çünkü SQL tarafında Türkçe karakter normalizasyonu ve yazım düzeltmesi
  * güvenilir şekilde yapılamıyor.
  */
+const { cariTelefonMetni } = require("./telefon");
 
 const TR_MAP = {
   ç: "c", Ç: "c", ğ: "g", Ğ: "g", ı: "i", I: "i", İ: "i", i: "i",
@@ -69,7 +70,8 @@ function indeksOlustur(rows) {
   const kayitlar = rows.map((r) => {
     const ad = normalize(r.AD);
     const kod = normalize(r.FIRMAKODU);
-    return { r, ad, kod, metin: (kod + " " + ad).trim(), tokenlar: ad.split(" ").filter(Boolean) };
+    const ek = normalize(`${r.YETKILI || ""} ${cariTelefonMetni(r)}`);
+    return { r, ad, kod, metin: `${kod} ${ad} ${ek}`.trim(), tokenlar: ad.split(" ").filter(Boolean) };
   });
 
   // Yazım düzeltmesi için kelime dağarcığı (frekanslı)

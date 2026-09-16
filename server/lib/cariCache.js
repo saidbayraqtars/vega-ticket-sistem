@@ -1,6 +1,8 @@
+const sql = require("mssql");
 const db = require("./db");
 const vega = require("./vega");
 const arama = require("./arama");
+const { telefonKolonlariniSirala, cariTelefonDegeri } = require("./telefon");
 
 /**
  * Cari kartlarını firma bazında belleğe alır.
@@ -19,11 +21,20 @@ const TTL_MS = 5 * 60 * 1000;
 const IMZA_ARALIGI_MS = 15 * 1000;
 const bellek = new Map(); // firmaNo:donemNo -> { ts, rows, indeks, imza, imzaTs }
 
-async function imzaAl(pool, tablo) {
-  const r = await pool.request().query(vega.kartImzasiSorgusu(tablo));
+async function imzaAl(pool, tablo, telefonKolonlari) {
+  const r = await pool.request().query(vega.kartImzasiSorgusu(tablo, telefonKolonlari));
   const satir = r.recordset[0] || {};
   return `${satir.ADET}:${satir.IMZA}`;
 }
+
+async function telefonKolonlariAl(pool, tablo) {
+  const r = await pool.request().input("tablo", sql.NVarChar, tablo).query(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tablo
+  `);
+  return telefonKolonlariniSirala(r.recordset.map((x) => x.COLUMN_NAME));
+}
+
+const kolonAdi = (ad) => "[" + String(ad).replaceAll("]", "]]") + "]";
 
 async function yukle(firmaNo, donemNo) {
   const pool = db.vega();
@@ -32,10 +43,14 @@ async function yukle(firmaNo, donemNo) {
   const hareketTablo = vega.hareketTablosu(firmaNo, donemNo, "CARIHAREKETLERI");
   await vega.tabloDogrula(pool, tablo);
   await vega.tabloDogrula(pool, hareketTablo);
+  const telefonKolonlari = await telefonKolonlariAl(pool, tablo);
 
   // İmza kartlardan ÖNCE alınır: arada bir değişiklik olursa sonraki kontrol
   // farkı görüp yeniden yükler, değişiklik kaçmaz.
-  const imza = await imzaAl(pool, tablo);
+  const imza = await imzaAl(pool, tablo, telefonKolonlari);
+  const telefonSecimi = telefonKolonlari.length
+    ? `,\n      ${telefonKolonlari.map((kolon) => `LTRIM(RTRIM(ISNULL(CAST(C.${kolonAdi(kolon)} AS NVARCHAR(1000)),''))) AS ${kolonAdi(kolon)}`).join(",\n      ")}`
+    : "";
   const r = await pool.request().query(`
     WITH Bakiye AS (
       SELECT
@@ -52,8 +67,6 @@ async function yukle(firmaNo, donemNo) {
       ${vega.AD_IFADESI}                   AS AD,
       LTRIM(RTRIM(ISNULL(C.KOD1,'')))      AS KOD1,
       LTRIM(RTRIM(ISNULL(C.FAKS,'')))      AS FAKS,
-      LTRIM(RTRIM(ISNULL(C.TELEFON1,'')))  AS TELEFON1,
-      LTRIM(RTRIM(ISNULL(C.YGSM,'')))      AS GSM,
       LTRIM(RTRIM(ISNULL(C.YETKILI,'')))   AS YETKILI,
       LTRIM(RTRIM(ISNULL(C.SEHIR,'')))     AS SEHIR,
       LTRIM(RTRIM(ISNULL(C.EMAIL,'')))     AS EMAIL,
@@ -62,14 +75,19 @@ async function yukle(firmaNo, donemNo) {
       ISNULL(B.ALACAK, 0)                  AS ALACAK,
       ISNULL(B.BORC, 0) - ISNULL(B.ALACAK, 0) AS BAKIYE,
       ISNULL(C.FIRMATIPI, 0)               AS FIRMATIPI
+      ${telefonSecimi}
     FROM [${tablo}] C
     LEFT JOIN Bakiye B ON B.CARIIND = C.IND
     WHERE ${vega.CARI_FILTRE}
   `);
 
-  const rows = r.recordset;
+  const rows = r.recordset.map((kart) => {
+    const telefon = cariTelefonDegeri(kart);
+    // Eski istemciler GSM alanını bekliyor; TELEFON yeni ortak gösterim alanı.
+    return { ...kart, TELEFON: telefon, GSM: telefon };
+  });
   const simdi = Date.now();
-  const kayit = { ts: simdi, rows, indeks: arama.indeksOlustur(rows), imza, imzaTs: simdi };
+  const kayit = { ts: simdi, rows, indeks: arama.indeksOlustur(rows), imza, imzaTs: simdi, telefonKolonlari };
   bellek.set(`${vega.pad4(firmaNo)}:${vega.pad4(donemNo)}`, kayit);
   return kayit;
 }
@@ -91,7 +109,7 @@ async function al(firmaNo, donemNo, { zorla = false } = {}) {
 
   if (Date.now() - mevcut.imzaTs >= IMZA_ARALIGI_MS) {
     try {
-      const imza = await imzaAl(db.vega(), vega.kartTablosu(firmaNo, "CARI"));
+      const imza = await imzaAl(db.vega(), vega.kartTablosu(firmaNo, "CARI"), mevcut.telefonKolonlari);
       mevcut.imzaTs = Date.now();
       if (imza !== mevcut.imza) return tekYukle(anahtar, firmaNo, donemNo);
     } catch {

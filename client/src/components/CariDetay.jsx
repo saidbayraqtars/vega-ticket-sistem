@@ -9,7 +9,9 @@ const bugunYerel = () => {
   const iki = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${iki(d.getMonth() + 1)}-${iki(d.getDate())}`;
 };
-const bosIslemFormu = { baslik: "", ucret: "", whatsappSablonu: VARSAYILAN_MESAJ_SABLONU };
+// 905321234567 -> 0532 123 45 67
+const telefonGoster = (t) => /^90\d{10}$/.test(t) ? `0${t.slice(2, 5)} ${t.slice(5, 8)} ${t.slice(8, 10)} ${t.slice(10)}` : t;
+const bosIslemFormu = { baslik: "", ofisNotu: "", ucret: "", whatsappSablonu: VARSAYILAN_MESAJ_SABLONU };
 
 export default function CariDetay({ firmaNo, donemNo, cariInd, yenilemeTetik, onTicketDegisti, onMusteriDegisti }) {
   const [veri, setVeri] = useState(null);
@@ -97,6 +99,7 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, yenilemeTetik, on
         DONEMNO: donemNo,
         CARIIND: veri.kart.IND,
         BASLIK: islem,
+        ACIKLAMA: form.ofisNotu,
         UCRET: form.ucret,
         WHATSAPPSABLONU: form.whatsappSablonu,
       });
@@ -145,7 +148,7 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, yenilemeTetik, on
         baslangic: sureForm.baslangic,
         sureAy: Number(sureForm.sureAy),
       });
-      setVeri((v) => ({ ...v, kart: r.kart }));
+      setVeri((v) => ({ ...v, kart: { ...r.kart, whatsappTelefonlari: v.kart.whatsappTelefonlari } }));
       onMusteriDegisti?.();
     } catch (err) {
       setHata(err.message);
@@ -214,29 +217,48 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, yenilemeTetik, on
 
       <form onSubmit={islemEkle} className="border-b bg-blue-50 px-4 py-3">
         <div className="mb-2 text-[13px] font-semibold">İşlem kaydı</div>
-        <textarea required maxLength={200} rows={3} value={form.baslik}
-          onChange={(e) => setForm({ ...form, baslik: e.target.value })}
-          placeholder="Yapılan işlem"
-          className="w-full resize-none rounded border border-[#c7ccd4] bg-white px-3 py-2 outline-none focus:border-blue-500" />
-        <div className="mt-2 flex items-center">
-          <label className="text-[12px] font-semibold text-gray-700">WhatsApp mesaj şablonu</label>
-          <button type="button" onClick={() => setForm({ ...form, whatsappSablonu: waSablon })}
-            className="ml-auto text-[11px] text-blue-700 hover:underline">Ayarlardaki şablonu yükle</button>
+        <div className="rounded border border-blue-200 bg-white/60 px-2.5 py-2">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-blue-800">Müşteriye gidecek</div>
+          <label className="text-[12px] font-semibold text-blue-900">Yapılan işlem</label>
+          <textarea required maxLength={200} rows={3} value={form.baslik}
+            onChange={(e) => setForm({ ...form, baslik: e.target.value })}
+            placeholder="Müşteriye bildirilecek yapılan işlem"
+            className="mt-1 w-full resize-none rounded border border-[#c7ccd4] bg-white px-3 py-2 outline-none focus:border-blue-500" />
+          <div className="mt-2 flex items-center">
+            <label className="text-[12px] font-semibold text-gray-700">WhatsApp mesaj şablonu</label>
+            <button type="button" onClick={() => setForm({ ...form, whatsappSablonu: waSablon })}
+              className="ml-auto text-[11px] text-blue-700 hover:underline">Ayarlardaki şablonu yükle</button>
+          </div>
+          <textarea required maxLength={1000} rows={3} value={form.whatsappSablonu}
+            onChange={(e) => setForm({ ...form, whatsappSablonu: e.target.value })}
+            placeholder="Ayarlar'daki değişkenli şablon"
+            className="mt-1 w-full resize-none rounded border border-[#c7ccd4] bg-white px-3 py-2 outline-none focus:border-blue-500" />
+          <div className="mt-1 flex text-[10px] text-gray-500">
+            <span>Durum: Kaydet dediğiniz anda WhatsApp kuyruğuna alınır; patron onayı beklenmez.</span>
+            <span className="ml-auto">{form.whatsappSablonu.length}/1000</span>
+          </div>
+          <div className="mt-1 rounded border border-blue-100 bg-white px-2 py-1.5 text-[11px] text-gray-700">
+            <span className="font-semibold text-blue-800">Gönderilecek mesaj: </span>
+            {mesajOnizle(form.whatsappSablonu, {
+              musteri: veri.kart.AD, cariKodu: veri.kart.FIRMAKODU, islem: form.baslik,
+              ucret: form.ucret, kullanici: kullaniciAl(),
+            })}
+          </div>
+          <div className={`mt-1 text-[11px] ${veri.kart.whatsappTelefonlari?.length ? "text-gray-700" : "text-red-700"}`}>
+            <span className="font-semibold">Gidecek numaralar: </span>
+            {veri.kart.whatsappTelefonlari?.length
+              ? veri.kart.whatsappTelefonlari.map(telefonGoster).join(" · ")
+              : "Caride WhatsApp'a uygun cep telefonu yok"}
+          </div>
         </div>
-        <textarea required maxLength={1000} rows={3} value={form.whatsappSablonu}
-          onChange={(e) => setForm({ ...form, whatsappSablonu: e.target.value })}
-          placeholder="Ayarlar'daki değişkenli şablon"
-          className="mt-1 w-full resize-none rounded border border-[#c7ccd4] bg-white px-3 py-2 outline-none focus:border-blue-500" />
-        <div className="mt-1 flex text-[10px] text-gray-500">
-          <span>Durum: Kaydet dediğiniz anda WhatsApp kuyruğuna alınır; patron onayı beklenmez.</span>
-          <span className="ml-auto">{form.whatsappSablonu.length}/1000</span>
-        </div>
-        <div className="mt-1 rounded border border-blue-100 bg-white px-2 py-1.5 text-[11px] text-gray-700">
-          <span className="font-semibold text-blue-800">Gönderilecek mesaj: </span>
-          {mesajOnizle(form.whatsappSablonu, {
-            musteri: veri.kart.AD, cariKodu: veri.kart.FIRMAKODU, islem: form.baslik,
-            ucret: form.ucret, kullanici: kullaniciAl(),
-          })}
+        <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2.5 py-2">
+          <label className="block text-[11px] font-bold uppercase tracking-wide text-amber-900">
+            Şirket içi not <span className="font-normal normal-case tracking-normal text-amber-800">— müşteriye gitmez</span>
+          </label>
+          <textarea maxLength={1000} rows={2} value={form.ofisNotu}
+            onChange={(e) => setForm({ ...form, ofisNotu: e.target.value })}
+            placeholder="Yalnız ofiste görülür: onay bekleyenler ve tamamlanan işlemler"
+            className="mt-1 w-full resize-none rounded border border-amber-200 bg-white px-3 py-2 outline-none focus:border-amber-500" />
         </div>
         <div className="mt-2 flex gap-2">
           <input inputMode="decimal" value={form.ucret}
@@ -263,10 +285,10 @@ export default function CariDetay({ firmaNo, donemNo, cariInd, yenilemeTetik, on
       <div className="border-b bg-[#eef1f5] px-3 py-2 text-[12px] font-semibold">Bitmiş işlemler ({ticketlar.length})</div>
       <div className="min-h-0 flex-1 overflow-auto bg-white">
         <table className="izgara">
-          <thead><tr><th style={{ width: 92 }}>Tarih</th><th>Yapılan işlem</th><th style={{ width: 115 }}>Söylenen ücret</th></tr></thead>
+          <thead><tr><th style={{ width: 92 }}>Tarih</th><th>Müşteriye iletilen işlem</th><th>Şirket içi not</th><th style={{ width: 115 }}>Söylenen ücret</th></tr></thead>
           <tbody>
-            {ticketlar.map((t) => <tr key={t.ID}><td>{tarih(t.KAPANISTARIHI)}</td><td title={t.BASLIK}>{t.BASLIK}</td><td className="sayi">{tl(t.UCRET)} ₺</td></tr>)}
-            {!ticketlar.length && <tr><td colSpan={3} className="py-6 text-center text-gray-500">Henüz işlem kaydı yok.</td></tr>}
+            {ticketlar.map((t) => <tr key={t.ID}><td>{tarih(t.KAPANISTARIHI)}</td><td title={t.BASLIK}>{t.BASLIK}</td><td title={t.ACIKLAMA}>{t.ACIKLAMA || "—"}</td><td className="sayi">{tl(t.UCRET)} ₺</td></tr>)}
+            {!ticketlar.length && <tr><td colSpan={4} className="py-6 text-center text-gray-500">Henüz işlem kaydı yok.</td></tr>}
           </tbody>
         </table>
       </div>
