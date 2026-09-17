@@ -1,8 +1,8 @@
 # Vega Müşteri İşlemleri — Devir Teslim
 
-Güncelleme: **16.09.2026**
+Güncelleme: **17.09.2026**
 
-Sürüm: **1.6.1**
+Sürüm: **1.7.0**
 
 Durum: **üretim paketi hazır**
 
@@ -16,15 +16,22 @@ Durum: **üretim paketi hazır**
 - Mesaj şablonunu herkes düzenler; onay bekleyen kaydın mesajı ayrıca düzenlenebilir ve başarısızsa yeniden gönderilir. 30 dakikada gönderilemeyen mesaj SQL Server saatine göre iptal edilir.
 - Kullanıcı isteğe bağlı 4-6 haneli PIN belirleyebilir. PIN'li kullanıcıya açılışta ve kullanıcı değiştirirken PIN sorulur; 5 yanlış denemede 1 dk kilit. Oturum yerel sunucunun belleğindedir, uygulama kapanınca düşer.
 - Servis kabulünde her cihaz için termal etiket basılır. Kayıtlar Serviste / Arızaya gönderilenler / Kargoya verilenler / Teslim / İptal sekmelerinde izlenir.
-- Arızaya gönderme ve kargoya verme alıcı bilgisiyle yapılır; her gönderim `SERVISGONDERIMLERI`'ne ayrı satır yazılır. A5 adres etiketi ve A5 barkod çıktısı normal yazıcıdan tarayıcı yazdırma penceresiyle alınır.
+- Arızaya gönderme ve kargoya verme alıcı bilgisiyle yapılır; her gönderim `SERVISGONDERIMLERI`'ne ayrı satır yazılır. A5 adres etiketi ve A5 barkod çıktısı normal yazıcıdan tarayıcı yazdırma penceresiyle alınır. A5 adres etiketi yerleşimi ortak ayardadır (`ORTAKAYARLAR`); termal etikete logo eklenir, logo ve yazı bloğu yeri bilgisayara özel etiket ayarındadır.
+- Termal yazıcı başka bilgisayardaysa etiket `ETIKETISLERI` kuyruğuna bırakılır (`lib/etiketKuyrugu.js`). Yazıcısını paylaşan bilgisayar `ETIKETYAZICILARI`'na 15 sn'de bir kalp atışı ve etiket düzeni yazar, kendine gelen işleri `UPDLOCK/READPAST` ile alır, modelleri veritabanından okuyup basar ve `CIHAZLAR.ETIKETBASILDI`'yı yazar. 10 dk'da basılamayan iş iptal, baskı sırasında yarıda kalan iş hata olur (kendiliğinden tekrar basılmaz). Paylaşan bilgisayarda pencere kapanınca uygulama tepside kalır; durum Electron'a IPC (`etiket-ana`) ile gelir.
+- Servis kaydından isteğe bağlı WhatsApp mesajı aynı `WHATSAPPMESAJLARI` kuyruğuna `SERVISID` ve `MESAJTURU` ile girer (`TICKETID` boş). Durum değişikliği kendiliğinden mesaj atmaz; tür şablonları `ORTAKAYARLAR`'dadır.
 
 ## Veri sınırı
 
 - Vega veritabanı: salt-okunur müşteri kartları, dönem hareketleri, firma bilgisi.
-- `VEGATICKETDB`: `TICKETLER`, `TICKETLOG`, `CARISURELERI`, `SERVISKAYITLARI`, `CIHAZLAR`, `SERVISGONDERIMLERI`, `WHATSAPPAYARLARI`, `WHATSAPPMESAJLARI`, `WHATSAPPMESAJAYARLARI`, `ORTAKAYARLAR`, `KULLANICILAR`.
+- `VEGATICKETDB`: `TICKETLER`, `TICKETLOG`, `CARISURELERI`, `SERVISKAYITLARI`, `CIHAZLAR`, `SERVISGONDERIMLERI`, `WHATSAPPAYARLARI`, `WHATSAPPMESAJLARI`, `WHATSAPPMESAJAYARLARI`, `ORTAKAYARLAR`, `ETIKETYAZICILARI`, `ETIKETISLERI`, `KULLANICILAR`.
 - Şema her açılışta eklemeli ve idempotent yükseltilir; servis/cihaz durum kısıtları `lib/db.js` içindeki tek listeden üretilir.
 
 Eski ticket kolonları geçmiş veri uyumluluğu için korunur ancak arayüzde gösterilmez ve API üzerinden değiştirilemez.
+
+## Doğrulama (1.7.0)
+
+- Sunucu testleri: 99/99.
+- Uzak etiket akışı geliştirme veritabanında sahte etiket bilgisayarıyla uçtan uca denendi: paylaşım listesi ve çevrim içi durumu, deneme etiketi, geçici servis kaydının 2 cihazı ve seçili tek cihaz, yazıcı hatası → tekrar gönder, eşzamanlı iki iş alımı, süre dolumu, yarıda kalan baskı, kalp atışı kesilmesi. İşçi döngüsü (`baslat`) sahte yazıcıyla denendi. Gerçek yazıcıya gönderim yapılmadı; test kayıtları silindi.
 
 ## Doğrulama (1.6.0)
 
@@ -40,7 +47,7 @@ Eski ticket kolonları geçmiş veri uyumluluğu için korunur ancak arayüzde g
 
 ## Dağıtım
 
-- Kurulum: `dist\Vega Ticket Setup 1.6.1.exe`
+- Kurulum: `dist\Vega Ticket Setup 1.7.0.exe`
 - Kaynak depo: özel `saidbayraqtars/vega-ticket-sistem`.
 - Güncelleme deposu: açık `saidbayraqtars/vega-ticket-sistem-releases`.
 - Paketli uygulama `electron-updater` ile yeni sürümü indirir ve kullanıcı onayıyla kurar.

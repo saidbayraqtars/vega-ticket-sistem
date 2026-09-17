@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, kullaniciAl } from "../api/client";
 import { MESAJ_DEGISKENLERI, VARSAYILAN_MESAJ_SABLONU } from "../lib/whatsappSablon";
+import ServisMesajSablonlari from "./ServisMesajSablonlari";
 
 export default function WhatsAppAyarlari() {
   const [durum, setDurum] = useState(null);
@@ -129,7 +130,7 @@ export default function WhatsAppAyarlari() {
       {durum?.hata && <div className="mt-2 rounded bg-amber-50 px-3 py-2 text-[11px] text-amber-800">{durum.hata}</div>}
     </fieldset>
     <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
-      <legend className="px-1 text-[12px] font-semibold text-gray-600">WhatsApp mesaj şablonu</legend>
+      <legend className="px-1 text-[12px] font-semibold text-gray-600">İşlem kaydı mesaj şablonu</legend>
       <label className="text-[12px] text-gray-600">Ticket kaydedildiğinde müşteriye gönderilecek ortak metin</label>
       <div className="text-[11px] text-gray-500">
         Tüm kullanıcılar düzenleyebilir; kaydedilen şablon her bilgisayarda geçerli olur.
@@ -159,6 +160,10 @@ export default function WhatsAppAyarlari() {
         </button>
       </div>
       {sablonMesaji && <div className={`mt-2 rounded px-3 py-2 text-[11px] ${sablonMesaji.hata ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-800"}`}>{sablonMesaji.metin}</div>}
+    </fieldset>
+    <fieldset className="mb-5 rounded border border-[#dfe3e8] bg-white p-4">
+      <legend className="px-1 text-[12px] font-semibold text-gray-600">Servis mesaj şablonları</legend>
+      <ServisMesajSablonlari />
     </fieldset>
     </>
   );

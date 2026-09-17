@@ -9,10 +9,12 @@ const kurulumRoute = require("./routes/kurulum");
 const cariRoute = require("./routes/cari");
 const ticketRoute = require("./routes/ticket");
 const servisRoute = require("./routes/servis");
+const servisWhatsappRoute = require("./routes/servisWhatsapp");
 const etiketRoute = require("./routes/etiket");
 const whatsappRoute = require("./routes/whatsapp");
 const kullaniciRoute = require("./routes/kullanici");
 const whatsappWorker = require("./lib/whatsappWorker");
+const etiketKuyrugu = require("./lib/etiketKuyrugu");
 const oturum = require("./lib/oturum");
 
 const PORT = parseInt(process.env.PORT, 10) || 3010;
@@ -95,6 +97,7 @@ app.use("/api/kurulum", kurulumRoute);
 app.use("/api/kullanici", kullaniciRoute);
 app.use("/api/cari", cariRoute);
 app.use("/api/ticket", ticketRoute);
+app.use("/api/servis", servisWhatsappRoute);
 app.use("/api/servis", servisRoute);
 app.use("/api/etiket", etiketRoute);
 app.use("/api/whatsapp", whatsappRoute);
@@ -141,17 +144,21 @@ async function baslat() {
   // Ortak ayarda bu bilgisayar ana makineyse QR oturumunu ve DB mesaj kuyruğunu
   // çalıştırır. İstemci makinelerde yerel WhatsApp oturumu hiç açılmaz.
   whatsappWorker.baslat();
+  // Yazıcısını paylaşan bilgisayar diğer bilgisayarların etiketlerini basar.
+  etiketKuyrugu.baslat();
   await veritabaninaBaglan();
 }
 
 process.on("SIGINT", async () => {
   whatsappWorker.kapat();
+  etiketKuyrugu.kapat();
   await db.kapat();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
   whatsappWorker.kapat();
+  etiketKuyrugu.kapat();
   await db.kapat();
   process.exit(0);
 });

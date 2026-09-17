@@ -47,7 +47,7 @@ test("üstte cari, ayıraçtan sonra cihaz ve arıza gelir", () => {
     const { metin } = etiket.uret(etiket.ORNEK_ETIKET, ayar);
     const ayirac = ayar.dil === "ZPL" ? metin.indexOf("^GB") : metin.indexOf("BAR ");
     assert.ok(ayirac > 0, `${ayar.dil}: ayıraç çizgisi yok`);
-    assert.ok(metin.indexOf("ÖZDEMİRKAYA") < ayirac, `${ayar.dil}: müşteri ayıracın altında`);
+    assert.ok(metin.indexOf("ÖRNEK BİLİŞİM") < ayirac, `${ayar.dil}: müşteri ayıracın altında`);
     assert.ok(metin.indexOf("0532 123 45 67") < ayirac, `${ayar.dil}: telefon ayıracın altında`);
     assert.ok(metin.indexOf("LaserJet") > ayirac, `${ayar.dil}: cihaz ayıracın üstünde`);
     assert.ok(metin.indexOf("ARIZA:") > ayirac, `${ayar.dil}: arıza ayıracın üstünde`);
@@ -168,7 +168,7 @@ test("80×40 yapışkan etikete arıza dahil bütün alanlar sığar", () => {
       { ...etiket.ORNEK_ETIKET, ariza: uzunAriza },
       { dil, genislikMm: 80, yukseklikMm: 40, dpi: 203 }
     );
-    for (const beklenen of ["SRV-00001", "ÖZDEMİRKAYA", "0532 123 45 67", "LaserJet", "S/N:", "ARIZA:"]) {
+    for (const beklenen of ["SRV-00001", "ÖRNEK BİLİŞİM", "0532 123 45 67", "LaserJet", "S/N:", "ARIZA:"]) {
       assert.ok(metin.includes(beklenen), `${dil} 80×40: "${beklenen}" etikete girmedi`);
     }
     // Ayıraç hâlâ cari ile cihaz bloğunu ayırıyor.
@@ -207,4 +207,75 @@ test("TSPL satırları seçilen fontla aynı katı kullanır", () => {
     const [, xKat, yKat] = satir.match(/,0,(\d+),(\d+),"/);
     assert.equal(xKat, yKat, satir);
   }
+});
+
+// 16×2 noktalık logo: ilk satır tamamen siyah, ikinci satır yalnız ilk nokta.
+const LOGO = {
+  resim: "data:image/png;base64,iVBORw0KGgo=",
+  bitmap: { genislik: 16, yukseklik: 2, veri: Buffer.from([0xff, 0xff, 0x80, 0x00]).toString("base64") },
+  xMm: 2, yMm: 3, genislikMm: 2, yukseklikMm: 0.25,
+};
+
+test("özel ayar yoksa yazı yerleşimi değişmez", () => {
+  const eski = etiket.uret(etiket.ORNEK_ETIKET, ZPL).metin;
+  const bos = etiket.uret(etiket.ORNEK_ETIKET, { ...ZPL, metinXMm: "", metinYMm: "", metinGenislikMm: "", yaziOlcek: "" }).metin;
+  assert.equal(bos, eski);
+  assert.equal(etiket.ayarNormalize({}).logo, null);
+});
+
+test("yazı bloğu verilen konuma taşınır ve genişliğe göre sarılır", () => {
+  // 30 mm @203 dpi = 240 nokta, 10 mm = 80 nokta.
+  const { metin } = etiket.uret(etiket.ORNEK_ETIKET, { ...ZPL, metinXMm: 30, metinYMm: 10, metinGenislikMm: 60 });
+  const satirlar = metin.split("\n").filter((s) => s.startsWith("^FO") && s.includes("^FD"));
+  assert.ok(satirlar[0].startsWith("^FO240,80^"), satirlar[0]);
+  assert.ok(satirlar.every((s) => /^\^FO24[01],/.test(s)), "tüm satırlar aynı soldan başlamalı");
+  const ayirac = metin.split("\n").find((s) => s.includes("^GB"));
+  assert.match(ayirac, /^\^FO240,\d+\^GB(\d+),/);
+  assert.equal(Number(ayirac.match(/\^GB(\d+),/)[1]), 480);  // 60 mm
+});
+
+test("yazı boyutu ölçeği satır yüksekliğine yansır", () => {
+  const boy = (olcek) =>
+    Number(etiket.uret(etiket.ORNEK_ETIKET, { ...ZPL, yaziOlcek: olcek }).metin.match(/\^A0N,(\d+),\d+\^FDSRV-00001/)[1]);
+  assert.ok(boy(1.5) > boy(1));
+  assert.ok(boy(0.7) < boy(1));
+  assert.equal(etiket.ayarNormalize({ yaziOlcek: 9 }).yaziOlcek, 2);
+});
+
+test("ZPL logosu ^GFA ile verilen konuma basılır, 1 = siyah", () => {
+  const { metin } = etiket.uret(etiket.ORNEK_ETIKET, { ...ZPL, logo: LOGO });
+  // 2 mm = 16 nokta, 3 mm = 24 nokta; 4 bayt, satır başına 2 bayt.
+  assert.ok(metin.includes("^FO16,24^GFA,4,4,2,FFFF8000^FS"), metin);
+  assert.ok(metin.indexOf("^GFA") < metin.indexOf("SRV-00001"), "logo yazının altında kalmalı");
+});
+
+test("TSPL logosu BITMAP ikili verisiyle, bitleri ters çevrilerek gönderilir", () => {
+  const { veri, metin } = etiket.uret(etiket.ORNEK_ETIKET, { ...TSPL, logo: LOGO });
+  assert.ok(metin.includes("BITMAP 16,24,2,2,0,<4 bayt logo>"), metin);
+  const onEk = Buffer.from("BITMAP 16,24,2,2,0,", "ascii");
+  const bas = veri.indexOf(onEk) + onEk.length;
+  assert.ok(bas > onEk.length);
+  // TSPL'de 0 = siyah nokta.
+  assert.deepEqual([...veri.subarray(bas, bas + 4)], [0x00, 0x00, 0x7f, 0xff]);
+  assert.equal(veri.subarray(bas + 4, bas + 6).toString("ascii"), "\r\n");
+  assert.ok(!veri.includes(Buffer.from("\u0000BITMAP")), "yer tutucu veride kalmamalı");
+});
+
+test("bozuk logo bitmap'i yok sayılır, PNG dışı resim logoyu kapatır", () => {
+  const eksik = etiket.logoNormalize({ ...LOGO, bitmap: { ...LOGO.bitmap, yukseklik: 3 } });
+  assert.equal(eksik.bitmap, null);
+  assert.ok(!etiket.uret(etiket.ORNEK_ETIKET, { ...ZPL, logo: eksik }).metin.includes("^GFA"));
+  assert.equal(etiket.logoNormalize({ ...LOGO, resim: "data:image/svg+xml;base64,PHN2Zz4=" }), null);
+  assert.equal(etiket.logoNormalize({ ...LOGO, resim: "javascript:alert(1)" }), null);
+});
+
+test("sürücü belgesi logoyu mm konumu ve saf base64 PNG ile taşır", () => {
+  const { belge } = etiket.belgeUret(etiket.ORNEK_ETIKET, { ...ZPL, logo: LOGO });
+  // Çok küçük ölçü en az 3×1 mm'ye büyütülür.
+  assert.deepEqual(belge.logo, { veri: "iVBORw0KGgo=", xMm: 2, yMm: 3, genislikMm: 3, yukseklikMm: 1 });
+  assert.equal(etiket.belgeUret(etiket.ORNEK_ETIKET, ZPL).belge.logo, null);
+});
+
+test("örnek etikette gerçek müşteri adı geçmez", () => {
+  assert.ok(!/ÖZDEMİRKAYA|ozdemirkaya/i.test(JSON.stringify(etiket.ORNEK_ETIKET)));
 });

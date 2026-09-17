@@ -8,12 +8,18 @@ const VARSAYILAN_MESAJ_SABLONU = "Merhaba, “{islem}” işlemi için uzak bağ
 const MESAJ_DEGISKENLERI = ["{firma}", "{ad}", "{unvan}", "{kod}", "{carikodu}", "{islem}", "{ucret}", "{tarih}", "{kullanici}"];
 const DEGISKEN_ADLARI = new Set(MESAJ_DEGISKENLERI.map((x) => x.slice(1, -1)));
 
-function mesajSablonuDogrula(sablon) {
+/** Şablon 1-1000 karakter ve içindeki her {değişken} izinli adlardan olmalı. */
+function sablonDogrula(sablon, adlar) {
   const sonuc = String(sablon ?? "").trim();
   if (!sonuc || sonuc.length > 1000) return null;
   const bulunanlar = [...sonuc.matchAll(/\{([^{}]+)\}/g)].map((m) => m[1].toLocaleLowerCase("tr-TR"));
-  return bulunanlar.every((ad) => DEGISKEN_ADLARI.has(ad)) ? sonuc : null;
+  return bulunanlar.every((ad) => adlar.has(ad)) ? sonuc : null;
 }
+
+const degiskenleriYerlestir = (sablon, degerler) =>
+  sablon.replace(/\{([^{}]+)\}/g, (_tum, ad) => degerler[String(ad).toLocaleLowerCase("tr-TR")] ?? "");
+
+const mesajSablonuDogrula = (sablon) => sablonDogrula(sablon, DEGISKEN_ADLARI);
 
 function mesajSablonuDoldur(sablon, veri = {}) {
   const gecerli = mesajSablonuDogrula(sablon || VARSAYILAN_MESAJ_SABLONU);
@@ -30,7 +36,7 @@ function mesajSablonuDoldur(sablon, veri = {}) {
     tarih: (veri.tarih instanceof Date ? veri.tarih : new Date(veri.tarih || Date.now())).toLocaleDateString("tr-TR"),
     kullanici: String(veri.kullanici || ""),
   };
-  return gecerli.replace(/\{([^{}]+)\}/g, (_tum, ad) => degerler[String(ad).toLocaleLowerCase("tr-TR")] ?? "");
+  return degiskenleriYerlestir(gecerli, degerler);
 }
 
 function mesajOlustur(islem) {
@@ -64,10 +70,17 @@ function disaAktar(row) {
   let mesaj = row.SONHATA;
   if (gonderildi) mesaj = `WhatsApp mesajı ana bilgisayardan ${numara}gönderildi.`;
   else if (sirada) mesaj = `WhatsApp mesajı ana bilgisayarda ${numara}gönderim sırasına alındı.`;
+  // Servis mesajı kullanıcı tarafından da iptal edilebilir; nedeni SONHATA'dadır.
+  else if (iptal && row.SONHATA && row.SONHATA !== SURE_HATASI) mesaj = row.SONHATA;
   else if (iptal) mesaj = `WhatsApp mesajı ${MESAJ_PENCERESI_DAKIKA} dakika içinde gönderilemediği için iptal edildi.`;
   else mesaj ||= "WhatsApp mesajı gönderilemedi.";
   return {
+    id: row.ID ?? null,
     ticketId: row.TICKETID,
+    servisId: row.SERVISID ?? null,
+    tur: row.MESAJTURU || null,
+    gonderen: row.GONDEREN || null,
+    kayitTarihi: row.KAYITTARIHI || null,
     durum,
     gonderildi,
     sirada,
@@ -83,7 +96,7 @@ function disaAktar(row) {
   };
 }
 
-const MESAJ_SUTUNLARI = `TICKETID, TELEFON, TELEFONLAR, GONDERILENLER, METIN, DURUM, DENEME, MESAJID, SONHATA, GONDERIMTARIHI`;
+const MESAJ_SUTUNLARI = `ID, TICKETID, TELEFON, TELEFONLAR, GONDERILENLER, METIN, DURUM, DENEME, MESAJID, SONHATA, GONDERIMTARIHI`;
 
 // Pencerenin kesin sınırı SQL Server saatiyle uygulanır; istemci saati yetkili değil.
 const SURESI_DOLDU = `DATEADD(MINUTE, ${MESAJ_PENCERESI_DAKIKA}, KAYITTARIHI) <= GETDATE()`;
@@ -165,6 +178,8 @@ module.exports = {
   SURESI_DOLDU,
   SURE_HATASI,
   mesajOlustur,
+  sablonDogrula,
+  degiskenleriYerlestir,
   mesajSablonuDogrula,
   mesajSablonuDoldur,
   mesajMetniCevir,

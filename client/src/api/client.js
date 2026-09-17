@@ -109,6 +109,16 @@ export const api = {
   servisMusteriAdres: (id) => istek(`/api/servis/${id}/musteri-adres`),
   servisGonderen: (firma) => istek("/api/servis/gonderen" + qs({ firma })),
   servisGonderenKaydet: (veri) => istek("/api/servis/gonderen", govdeli("POST", veri)),
+  servisAdresTasarim: () => istek("/api/servis/adres-etiketi/tasarim"),
+  servisAdresTasarimKaydet: (tasarim) => istek("/api/servis/adres-etiketi/tasarim", govdeli("POST", { tasarim })),
+  servisWhatsappSablonlar: () => istek("/api/servis/whatsapp/sablonlar"),
+  servisWhatsappSablonKaydet: (tur, sablon) => istek("/api/servis/whatsapp/sablonlar", govdeli("POST", { tur, sablon })),
+  servisWhatsappTaslak: (id) => istek(`/api/servis/${id}/whatsapp/taslak`),
+  servisWhatsappGonder: (id, veri) => istek(`/api/servis/${id}/whatsapp`, govdeli("POST", veri)),
+  servisWhatsappMesajGuncelle: (mesajId, metin) => istek(`/api/servis/whatsapp/${mesajId}`, govdeli("PATCH", { METIN: metin })),
+  servisWhatsappTekrar: (mesajId, metin) =>
+    istek(`/api/servis/whatsapp/${mesajId}/tekrar`, govdeli("POST", metin === undefined ? {} : { METIN: metin })),
+  servisWhatsappIptal: (mesajId) => istek(`/api/servis/whatsapp/${mesajId}/iptal`, { method: "POST" }),
 
   etiketYazicilar: () => istek("/api/etiket/yazicilar"),
   etiketAyar: () => istek("/api/etiket/ayar"),
@@ -117,6 +127,11 @@ export const api = {
   etiketDene: (ayar) => istek("/api/etiket/dene", govdeli("POST", { ayar })),
   etiketDilDene: (ayar) => istek("/api/etiket/dil-dene", govdeli("POST", { ayar })),
   etiketBas: (veri) => istek("/api/etiket/bas", govdeli("POST", veri)),
+  etiketPaylasilanlar: () => istek("/api/etiket/paylasilanlar"),
+  etiketPaylasilan: (makine) => istek("/api/etiket/paylasilan" + qs({ makine })),
+  etiketUzakDene: (hedefMakine) => istek("/api/etiket/uzak-dene", govdeli("POST", { hedefMakine })),
+  etiketIsDurumu: (id) => istek(`/api/etiket/is/${id}`),
+  etiketIsTekrar: (id) => istek(`/api/etiket/is/${id}/tekrar`, { method: "POST" }),
 
   whatsappDurum: () => istek("/api/whatsapp/durum"),
   whatsappSablon: () => istek("/api/whatsapp/sablon"),

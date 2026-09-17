@@ -16,12 +16,15 @@ let sunucu = null;
 let pencere = null;
 const tekOrnek = app.requestSingleInstanceLock();
 
-// WhatsApp ana bilgisayarında pencere kapanınca uygulama tepside çalışmaya
-// devam eder; kuyruktaki mesajları gönderen sunucu bu süreçte yaşar. Windows
-// açılışında da "--arka-plan" ile gizli başlatılır.
+// WhatsApp ana bilgisayarında ve yazıcısını paylaşan etiket bilgisayarında
+// pencere kapanınca uygulama tepside çalışmaya devam eder; kuyruktaki mesajları
+// gönderen / etiketleri basan sunucu bu süreçte yaşar. Windows açılışında da
+// "--arka-plan" ile gizli başlatılır.
 const ARKA_PLAN_ARGUMANI = "--arka-plan";
 const arkaPlanBaslangic = process.argv.includes(ARKA_PLAN_ARGUMANI);
-let whatsappAna = false;
+// null: sunucu henüz bildirmedi. Gizli açılışta ikisi de bilinmeden kapanılmaz.
+const gorevler = { whatsapp: null, etiket: null };
+const arkaPlanGorevi = () => Boolean(gorevler.whatsapp || gorevler.etiket);
 let gizliBekliyor = arkaPlanBaslangic;
 let tepsi = null;
 let tepsiBilgisiGosterildi = false;
@@ -77,7 +80,8 @@ function sunucuBaslat() {
   sunucu.stdout?.on("data", (d) => process.stdout.write(`[server] ${d}`));
   sunucu.stderr?.on("data", (d) => process.stderr.write(`[server] ${d}`));
   sunucu.on("message", (mesaj) => {
-    if (mesaj?.tip === "whatsapp-ana") anaDurumuAyarla(Boolean(mesaj.ana));
+    if (mesaj?.tip === "whatsapp-ana") gorevDurumuAyarla("whatsapp", Boolean(mesaj.ana));
+    if (mesaj?.tip === "etiket-ana") gorevDurumuAyarla("etiket", Boolean(mesaj.ana));
   });
   sunucu.on("exit", (kod) => {
     if (kod === 0 || app.isQuitting) return;
@@ -98,18 +102,29 @@ function sunucuBaslat() {
   });
 }
 
-function anaDurumuAyarla(ana) {
-  whatsappAna = ana;
+function gorevDurumuAyarla(gorev, acik) {
+  gorevler[gorev] = acik;
+  const gerekli = arkaPlanGorevi();
   if (!gelistirme) {
-    // Ana bilgisayar yeniden başlatılsa da mesaj gönderimi kendiliğinden sürsün.
-    app.setLoginItemSettings({ openAtLogin: ana, args: [ARKA_PLAN_ARGUMANI] });
+    // Bilgisayar yeniden başlatılsa da mesaj gönderimi / etiket basımı kendiliğinden sürsün.
+    app.setLoginItemSettings({ openAtLogin: gerekli, args: [ARKA_PLAN_ARGUMANI] });
   }
-  // Windows açılışında gizli başlayıp ana olmadığı anlaşılan uygulama kapanır.
-  if (!ana && gizliBekliyor && !pencere?.isVisible()) {
+  // Windows açılışında gizli başlayıp hiçbir arka plan görevi olmadığı
+  // anlaşılan uygulama kapanır.
+  const hepsiBildirildi = gorevler.whatsapp !== null && gorevler.etiket !== null;
+  if (!gerekli && hepsiBildirildi && gizliBekliyor && !pencere?.isVisible()) {
     app.quit();
     return;
   }
   tepsiDurumunuGuncelle();
+}
+
+/** Tepside ve kapatma uyarısında gösterilen görevler. */
+function gorevAdlari() {
+  return [
+    gorevler.whatsapp && { rol: "WhatsApp ana bilgisayarı", etki: "WhatsApp mesajları gönderilmez", surer: "WhatsApp mesajları gönderilmeye" },
+    gorevler.etiket && { rol: "etiket bilgisayarı", etki: "diğer bilgisayarlardan gelen etiketler basılmaz", surer: "diğer bilgisayarlardan gelen etiketler basılmaya" },
+  ].filter(Boolean);
 }
 
 function pencereyiGoster() {
@@ -127,12 +142,13 @@ function pencereyiGoster() {
 }
 
 async function tamamenKapat() {
-  if (whatsappAna) {
+  const adlar = gorevAdlari();
+  if (adlar.length) {
     const sonuc = await dialog.showMessageBox({
       type: "warning",
       title: "Vega Ticket kapatılsın mı?",
-      message: "Bu bilgisayar WhatsApp ana bilgisayarı.",
-      detail: "Program yeniden açılana kadar WhatsApp mesajları gönderilmez.",
+      message: `Bu bilgisayar ${adlar.map((g) => g.rol).join(" ve ")}.`,
+      detail: `Program yeniden açılana kadar ${adlar.map((g) => g.etki).join(", ")}.`,
       buttons: ["Tamamen kapat", "Vazgeç"],
       defaultId: 1,
       cancelId: 1,
@@ -152,7 +168,7 @@ async function tepsiSimgesi() {
 
 let tepsiHazirlaniyor = false;
 async function tepsiDurumunuGuncelle() {
-  const gerekli = whatsappAna || gizliBekliyor;
+  const gerekli = arkaPlanGorevi() || gizliBekliyor;
   if (!gerekli) {
     tepsi?.destroy();
     tepsi = null;
@@ -173,7 +189,11 @@ async function tepsiDurumunuGuncelle() {
   tepsi.setContextMenu(Menu.buildFromTemplate([
     { label: "Vega Ticket'ı aç", click: pencereyiGoster },
     {
-      label: whatsappAna ? "WhatsApp mesajları bu bilgisayardan gönderiliyor" : "WhatsApp ana bilgisayarı değil",
+      label: gorevler.whatsapp ? "WhatsApp mesajları bu bilgisayardan gönderiliyor" : "WhatsApp ana bilgisayarı değil",
+      enabled: false,
+    },
+    {
+      label: gorevler.etiket ? "Diğer bilgisayarların etiketleri bu bilgisayarda basılıyor" : "Etiket yazıcısı paylaşılmıyor",
       enabled: false,
     },
     { type: "separator" },
@@ -226,7 +246,7 @@ function pencereOlustur() {
     if (!arkaPlanBaslangic) pencere.show();
   });
   pencere.on("close", (olay) => {
-    if (app.isQuitting || !whatsappAna) return;
+    if (app.isQuitting || !arkaPlanGorevi()) return;
     olay.preventDefault();
     pencere.hide();
     gizliBekliyor = true;
@@ -236,7 +256,8 @@ function pencereOlustur() {
       tepsi?.displayBalloon({
         iconType: "info",
         title: "Vega Ticket arka planda çalışıyor",
-        content: "WhatsApp mesajları gönderilmeye devam edecek. Açmak veya tamamen kapatmak için bu simgeyi kullanın.",
+        content: `${gorevAdlari().map((g) => g.surer).join(", ")} devam edecek. Açmak veya tamamen kapatmak için bu simgeyi kullanın.`
+          .replace(/^./, (h) => h.toLocaleUpperCase("tr-TR")),
       });
     }
   });

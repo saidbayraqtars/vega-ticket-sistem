@@ -13,7 +13,8 @@
 # Belge biçimi:
 #   { genislikMm, yukseklikMm, adet,
 #     satirlar: [ { metin, xMm, yMm, boyMm, kalin } ],
-#     ayirac:   { xMm, yMm, genislikMm, kalinlikMm } | null }
+#     ayirac:   { xMm, yMm, genislikMm, kalinlikMm } | null,
+#     logo:     { veri (base64 PNG), xMm, yMm, genislikMm, yukseklikMm } | null }
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
@@ -63,6 +64,21 @@ $doc.add_PrintPage({
   $g.PageUnit = [System.Drawing.GraphicsUnit]::Millimeter
   $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
   $siyah = [System.Drawing.Brushes]::Black
+
+  # Logo yazının altında kalsın diye önce çizilir.
+  $logo = $script:belge.logo
+  if ($logo -and $logo.veri) {
+    $bayt = [Convert]::FromBase64String($logo.veri)
+    $akis = New-Object System.IO.MemoryStream(,$bayt)
+    $resim = [System.Drawing.Image]::FromStream($akis)
+    try {
+      $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $g.DrawImage($resim, [single]$logo.xMm, [single]$logo.yMm, [single]$logo.genislikMm, [single]$logo.yukseklikMm)
+    } finally {
+      $resim.Dispose()
+      $akis.Dispose()
+    }
+  }
 
   # Metni tam verilen noktadan başlat — GDI'nin varsayılan yazı tipi
   # boşluklarını eklemesin, yoksa satırlar aşağı kayar.

@@ -40,14 +40,14 @@ export default function WhatsAppRozet() {
     <>
       <button type="button" onClick={() => setAcik(true)}
         className={`flex max-w-[460px] items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] ${renk}`}
-        title={[durum?.hata, "Bağlantı ve mesaj şablonu için tıklayın"].filter(Boolean).join(" — ")}>
+        title={[durum?.hata, "Bağlantı ve mesaj şablonları için tıklayın"].filter(Boolean).join(" — ")}>
         <span className={`h-2 w-2 shrink-0 rounded-full ${nokta}`} />
         <span className="shrink-0 font-semibold">{yazi}</span>
         {kim && <span className="truncate opacity-80">· Açık: {kim}</span>}
         {durum?.hesap && <span className="shrink-0 font-mono opacity-70">+{durum.hesap}</span>}
       </button>
       {acik && (
-        <Modal baslik="WhatsApp bağlantısı ve mesaj şablonu" onKapat={() => setAcik(false)} genislik={720}>
+        <Modal baslik="WhatsApp bağlantısı ve mesaj şablonları" onKapat={() => setAcik(false)} genislik={720}>
           <WhatsAppAyarlari />
         </Modal>
       )}

@@ -1,6 +1,6 @@
 {
   "name": "vega-ticket-server",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Vega Ticket Sistem backend — Express + mssql",
   "main": "server.js",
   "scripts": {

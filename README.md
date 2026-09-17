@@ -39,11 +39,15 @@ ERP veritabanına **hiç yazmaz**. Müşteri kartlarını ve cari bakiyeleri sal
 - İşlem kaydedildiği anda mesaj kuyruğa alınır; 30 dakikada gönderilemeyen mesaj iptal edilir.
 - Her ekranda bağlantı durumu ile oturumun hangi kullanıcıda ve bilgisayarda açık olduğu görünür.
 - Gönderilmemiş mesaj düzenlenebilir ve yeniden gönderilebilir.
+- Servis kaydından **isteğe bağlı** mesaj: tür seçilir (kabul edildi, teslime hazır, yetkili servise gönderildi, kargoya verildi, teslim edildi, genel), ortak şablon kayıt bilgileriyle (`{servisno}`, `{cihaz}`, `{kargo}`, `{takipno}` …) doldurulur, metin ve numaralar gönderimden önce değiştirilir. Hiçbir durum değişikliği kendiliğinden mesaj atmaz; kabul, teslime hazır, arıza ve kargo sonrasında yalnız "WhatsApp ile bildir" önerisi çıkar.
+- Servis mesajları kayıt detayında durumuyla listelenir; sıradaki mesaj düzenlenir veya iptal edilir, gönderilemeyen mesaj yeniden gönderilir (ulaşan numaralar atlanır).
 
 ### Servis kabul, arıza ve kargo takibi
-- Müşteri cihazıyla geldiğinde kabul kaydı açılır; her cihaz için termal etiket basılır.
+- Müşteri cihazıyla geldiğinde kabul kaydı açılır; her cihaz için termal etiket basılır. Termal etikete logo eklenir; logo ve yazı bloğunun yeri, genişliği ve yazı boyutu ayarlardan sürükleyerek ya da mm olarak değiştirilir.
+- **Başka bilgisayardaki etiket yazıcısı:** yazıcının bağlı olduğu bilgisayar ayarlardan yazıcısını paylaşır; diğer bilgisayarlar onu hedef seçer ve "Etiket bas" işi ortak veritabanındaki kuyruğa (`ETIKETISLERI`) bırakır. Bilgisayarlar birbirine doğrudan bağlanmaz. Durum (sırada / basıldı / hata) ekranda izlenir, basılamayan iş tekrar gönderilir; 10 dakikada basılamayan iş iptal olur. Etiket bilgisayarında pencere kapansa da program tepside çalışır.
 - Sekmeler: Serviste · Arızaya gönderilenler · Kargoya verilenler · Teslim edilenler · İptal edilenler.
 - Arızaya gönderme / kargoya verme penceresi: alıcı adres defteri, Vega'dan müşteri adresi önerisi, kargo firması ve takip numarası. Gönderimler geçmişte ayrı satır olarak saklanır.
+- **A5 adres etiketi** tasarlanabilir: gönderen ve alıcı kutuları, logo, "Dikkat kırılır" işareti, servis/kargo satırı, barkod ve cihaz listesi önizlemede sürüklenerek yerleştirilir; yatay veya dikey A5. Tasarım tüm bilgisayarlarda ortaktır.
 - **A5 adres etiketi** ve **A5 barkod çıktısı**:
 
 | A5 adres etiketi | A5 barkod kartları |
@@ -94,9 +98,11 @@ Her bilgisayar kendi yerel sunucusunu çalıştırır ve yalnız `127.0.0.1:3010
 | `CIHAZLAR` | Kabuldeki cihazlar, arıza, etiket basım bilgisi |
 | `SERVISGONDERIMLERI` | Arızaya gönderim / kargo geçmişi: alıcı, adres, kargo firması, takip no |
 | `WHATSAPPAYARLARI` | Ana bilgisayar, oturumun açık olduğu kullanıcı, bağlantı kalp atışı |
-| `WHATSAPPMESAJLARI` | Merkezi gönderim kuyruğu ve deneme/hata/iptal durumu |
+| `WHATSAPPMESAJLARI` | Merkezi gönderim kuyruğu ve deneme/hata/iptal durumu; işlem kaydı (`TICKETID`) veya servis kaydı (`SERVISID`) mesajı |
 | `WHATSAPPMESAJAYARLARI` | Ortak mesaj şablonu |
-| `ORTAKAYARLAR` | Tüm bilgisayarların paylaştığı ayarlar (ör. etiketteki gönderen) |
+| `ORTAKAYARLAR` | Tüm bilgisayarların paylaştığı ayarlar (etiketteki gönderen, A5 etiket tasarımı, servis mesaj şablonları) |
+| `ETIKETYAZICILARI` | Yazıcısını paylaşan bilgisayarlar, kalp atışı ve önizleme için yayımlanan etiket düzeni |
+| `ETIKETISLERI` | Başka bilgisayara gönderilen etiket baskı kuyruğu (bekliyor / basılıyor / basıldı / hata / iptal) |
 | `KULLANICILAR` | Kullanıcılar ve isteğe bağlı PIN özeti |
 
 Vega tarafında yalnız `TBLCARI` (müşteri kartı), `TBLCARIHAREKETLERI` (dönem bakiyesi), `TBLCARIKODTAN`, `TBLFIRMA` ve `TBLDONEM` okunur. Firma ve dönem kurulum ekranından seçilir. Şema kanıtları: [SEMA-DOGRULAMA.md](SEMA-DOGRULAMA.md).
@@ -122,7 +128,15 @@ Vega tarafında yalnız `TBLCARI` (müşteri kartı), `TBLCARIHAREKETLERI` (dön
 | `GET /api/servis/gonderim/adresler` | Daha önce kullanılan alıcılar |
 | `GET /api/servis/:id/musteri-adres` | Vega kartından müşteri adresi |
 | `GET` / `POST /api/servis/gonderen` | Etiketteki ortak gönderen bilgisi |
-| `POST /api/etiket/bas` | Cihaz etiketlerini termal yazıcıya basma |
+| `GET` / `POST /api/servis/adres-etiketi/tasarim` | A5 adres etiketi yerleşimi ve logo |
+| `GET` / `POST /api/servis/whatsapp/sablonlar` | Servis mesaj türleri ve ortak şablonları |
+| `GET /api/servis/:id/whatsapp/taslak` | Kayıt bilgileriyle doldurulmuş metinler ve numara adayları |
+| `POST /api/servis/:id/whatsapp` | Servis kaydından WhatsApp mesajını kuyruğa alma |
+| `PATCH /api/servis/whatsapp/:mesajId` · `POST …/tekrar` · `POST …/iptal` | Servis mesajını düzenleme, yeniden gönderme, iptal |
+| `POST /api/etiket/bas` | Cihaz etiketlerini termal yazıcıya basma; hedef başka bilgisayarsa kuyruğa bırakma (202) |
+| `GET /api/etiket/paylasilanlar` · `GET /api/etiket/paylasilan` | Yazıcısını paylaşan bilgisayarlar ve etiket düzeni |
+| `POST /api/etiket/uzak-dene` | Seçilen etiket bilgisayarına deneme etiketi |
+| `GET /api/etiket/is/:id` · `POST …/tekrar` | Uzak baskı işinin durumu, basılamayan işi yeniden sıraya alma |
 | `GET /api/whatsapp/durum` | Bağlantı, ana bilgisayar ve oturum kullanıcısı |
 | `GET` / `POST /api/whatsapp/sablon` | Ortak mesaj şablonu |
 | `POST /api/whatsapp/gonder` | Başarısız bildirimi yeniden gönderme |
@@ -137,10 +151,12 @@ npm install --prefix client
 npm install --prefix desktop
 
 npm run dev              # sunucu (3010) + Vite arayüzü (5180)
-npm test --prefix server # 70 test
+npm test --prefix server # 99 test
 npm run build --prefix client
 npm run dist             # Windows kurulum dosyası → dist/
 ```
+
+`WHATSAPPMESAJLARI` tablosunda filtreli tekil indeks bulunduğundan tabloya elle `sqlcmd` ile yazarken `-I` (QUOTED_IDENTIFIER ON) verin.
 
 İlk açılışta kurulum ekranından SQL Server bağlantısı, firma, dönem ve kullanıcı seçilir; `VEGATICKETDB` yoksa oluşturulur. Bağlantı ayarı ve makineye özel WhatsApp oturumu `%APPDATA%/vega-ticket-desktop` altında tutulur, depoya girmez.
 

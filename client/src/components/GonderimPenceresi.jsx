@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import { yazdir, adresEtiketiHtml, barkodSayfasiHtml } from "../lib/yazdir";
+import { yazdir, adresEtiketiYazdir, barkodSayfasiHtml } from "../lib/yazdir";
 import Modal from "./Modal";
 
 const KARGO_FIRMALARI = ["Yurtiçi Kargo", "Aras Kargo", "MNG Kargo", "Sürat Kargo", "PTT Kargo", "HepsiJET", "Kolay Gelsin", "UPS", "DHL", "Elden teslim"];
 const BOS_FORM = { ALICIADI: "", ALICIYETKILI: "", ALICITELEFON: "", ALICIADRES: "", ALICIIL: "", KARGOFIRMASI: "", TAKIPNO: "", NOTU: "" };
 const ADRES_ALANLARI = ["ALICIADI", "ALICIYETKILI", "ALICITELEFON", "ALICIADRES", "ALICIIL", "KARGOFIRMASI"];
+const BOS_GONDEREN = { ad: "", yetkili: "", adres: "", il: "", telefon: "", eposta: "" };
 const adresSec = (a) => Object.fromEntries(ADRES_ALANLARI.map((k) => [k, a?.[k] ?? ""]));
 
 /**
@@ -19,7 +20,7 @@ export default function GonderimPenceresi({ kayit, tur, firmaNo, onKapat, onKayd
   const [form, setForm] = useState(BOS_FORM);
   const [rv, setRv] = useState(kayit.RV);
   const [adresler, setAdresler] = useState([]);
-  const [gonderen, setGonderen] = useState({ ad: "", adres: "", il: "", telefon: "" });
+  const [gonderen, setGonderen] = useState(BOS_GONDEREN);
   const [gonderenAcik, setGonderenAcik] = useState(false);
   const [gonderenMesaj, setGonderenMesaj] = useState(null);
   const [mesgul, setMesgul] = useState(false);
@@ -28,7 +29,7 @@ export default function GonderimPenceresi({ kayit, tur, firmaNo, onKapat, onKayd
   useEffect(() => {
     api.servisGonderen(firmaNo)
       .then((r) => {
-        setGonderen({ ad: "", adres: "", il: "", telefon: "", ...r.gonderen });
+        setGonderen({ ...BOS_GONDEREN, ...r.gonderen });
         // Hiç kaydedilmemişse (Vega'dan öneri) kontrol edilsin diye açık gelir.
         setGonderenAcik(r.kaynak !== "ayar");
       })
@@ -61,7 +62,8 @@ export default function GonderimPenceresi({ kayit, tur, firmaNo, onKapat, onKayd
     try {
       const r = await api.servisGonderim(kayit.ID, { TUR: tur, RV: rv, ...form });
       if (yazdirIste) {
-        await yazdir(`${r.kayit.SERVISNO} adres etiketi`, adresEtiketiHtml({ kayit: r.kayit, gonderim: r.kayit.gonderimler[0], gonderen }));
+        const t = await api.servisAdresTasarim().catch(() => ({ tasarim: null }));
+        await adresEtiketiYazdir({ kayit: r.kayit, gonderim: r.kayit.gonderimler[0], gonderen, tasarim: t.tasarim });
       }
       onKaydedildi(r.kayit, tur);
     } catch (err) {
@@ -130,7 +132,7 @@ export default function GonderimPenceresi({ kayit, tur, firmaNo, onKapat, onKayd
         </button>
         {gonderenAcik && (
           <div className="mt-2 grid grid-cols-2 gap-2">
-            {[["ad", "Firma adı", 2], ["adres", "Adres", 2], ["il", "İlçe / İl", 1], ["telefon", "Telefon", 1]].map(([k, etiket, span]) => (
+            {[["ad", "Firma adı", 2], ["yetkili", "Yetkili", 1], ["eposta", "E-posta", 1], ["adres", "Adres", 2], ["il", "İlçe / İl", 1], ["telefon", "Telefon", 1]].map(([k, etiket, span]) => (
               <label key={k} className={span === 2 ? "col-span-2" : undefined}>
                 <span className="mb-1 block text-gray-600">{etiket}</span>
                 <input className={girdi} value={gonderen[k] || ""} onChange={(e) => setGonderen((g) => ({ ...g, [k]: e.target.value }))} />
@@ -162,7 +164,7 @@ export default function GonderimPenceresi({ kayit, tur, firmaNo, onKapat, onKayd
       <p className="mt-2 text-[11px] text-gray-500">
         Kaydedince kayıt “{ariza ? "Arızaya gönderildi" : "Kargoya verildi"}” durumuna geçer ve
         “{ariza ? "Arızaya gönderilenler" : "Kargoya verilenler"}” listesinde görünür. A5 çıktı normal yazıcıya gider;
-        yazdırma penceresinde kâğıt boyutunu A5 seçin.
+        yazdırma penceresinde kâğıt boyutunu A5 seçin. Logo ve yazıların yeri servis ekranındaki “A5 etiket tasarımı”ndan ayarlanır.
       </p>
     </Modal>
   );

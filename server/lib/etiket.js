@@ -133,19 +133,68 @@ const VARSAYILAN = {
   asciiyeIndir: false,
   yazici: "",
   adet: 1,
+  // Yazı bloğunun yeri; boşsa kenar boşluğundan başlar ve etiketi doldurur.
+  metinXMm: null,
+  metinYMm: null,
+  metinGenislikMm: null,
+  yaziOlcek: 1,
+  // { resim: PNG data URL, bitmap: { genislik, yukseklik, veri }, xMm, yMm, genislikMm, yukseklikMm }
+  logo: null,
+  // Bu bilgisayarın yazıcısı başka bilgisayarlardan gelen etiketleri de basar.
+  paylas: false,
+  // Boş değilse etiketler bu adlı bilgisayarın yazıcısına gönderilir.
+  hedefMakine: "",
 };
+
+/** Boş alan varsayılana düşer — Number("") === 0 tuzağı. */
+function sayi(deger, varsayilan, alt, ust) {
+  const ham = String(deger ?? "").trim().replace(",", ".");
+  if (!ham) return varsayilan;
+  const n = Number(ham);
+  if (!Number.isFinite(n)) return varsayilan;
+  return Math.min(Math.max(n, alt), ust);
+}
+
+const LOGO_RESMI = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+const LOGO_EN_FAZLA_KARAKTER = 700000;
+const BITMAP_EN_FAZLA_NOKTA = 2400;
+
+/**
+ * Logo iki biçimde gelir: Windows sürücüsü yolu için PNG, ham komut yolu için
+ * arayüzün etiket çözünürlüğünde ürettiği 1 bit/nokta bitmap (satır başına
+ * ceil(genişlik/8) bayt, en soldaki bit 1 = siyah). Bozuk bitmap yok sayılır.
+ */
+function logoNormalize(ham) {
+  if (!ham || typeof ham !== "object") return null;
+  const resim = String(ham.resim || "");
+  if (resim.length > LOGO_EN_FAZLA_KARAKTER || !LOGO_RESMI.test(resim)) return null;
+  let bitmap = null;
+  const b = ham.bitmap || {};
+  const genislik = Number(b.genislik);
+  const yukseklik = Number(b.yukseklik);
+  const veri = String(b.veri || "");
+  if (Number.isInteger(genislik) && Number.isInteger(yukseklik) && genislik > 0 && yukseklik > 0
+    && genislik <= BITMAP_EN_FAZLA_NOKTA && yukseklik <= BITMAP_EN_FAZLA_NOKTA && /^[A-Za-z0-9+/=]+$/.test(veri)
+    && Buffer.from(veri, "base64").length === Math.ceil(genislik / 8) * yukseklik) {
+    bitmap = { genislik, yukseklik, veri };
+  }
+  return {
+    resim,
+    bitmap,
+    xMm: sayi(ham.xMm, 2, 0, 200),
+    yMm: sayi(ham.yMm, 2, 0, 200),
+    genislikMm: sayi(ham.genislikMm, 20, 3, 200),
+    yukseklikMm: sayi(ham.yukseklikMm, 10, 1, 200),
+  };
+}
+
+/** İsteğe bağlı mm değeri: boşsa null (otomatik). */
+function secimliMm(deger, alt, ust) {
+  return String(deger ?? "").trim() === "" ? null : sayi(deger, null, alt, ust);
+}
 
 /** Ayarı normalize eder; arayüzden gelen serbest metni sayıya sabitler. */
 function ayarNormalize(ham = {}) {
-  const sayi = (deger, varsayilan, alt, ust) => {
-    // Number("") === 0 olduğu için boş alan sıfıra değil varsayılana düşmeli;
-    // aksi halde eksik gönderilen ayar etiketi 20 mm'ye küçültür.
-    const ham = String(deger ?? "").trim().replace(",", ".");
-    if (!ham) return varsayilan;
-    const n = Number(ham);
-    if (!Number.isFinite(n)) return varsayilan;
-    return Math.min(Math.max(n, alt), ust);
-  };
   return {
     yontem: String(ham.yontem || VARSAYILAN.yontem).toLowerCase() === "ham" ? "ham" : "surucu",
     dil: String(ham.dil || VARSAYILAN.dil).toUpperCase() === "TSPL" ? "TSPL" : "ZPL",
@@ -159,6 +208,13 @@ function ayarNormalize(ham = {}) {
     asciiyeIndir: Boolean(ham.asciiyeIndir),
     yazici: String(ham.yazici || "").trim().slice(0, 200),
     adet: Math.round(sayi(ham.adet, VARSAYILAN.adet, 1, 10)),
+    metinXMm: secimliMm(ham.metinXMm, 0, 200),
+    metinYMm: secimliMm(ham.metinYMm, 0, 200),
+    metinGenislikMm: secimliMm(ham.metinGenislikMm, 5, 200),
+    yaziOlcek: sayi(ham.yaziOlcek, VARSAYILAN.yaziOlcek, 0.5, 2),
+    logo: logoNormalize(ham.logo),
+    paylas: Boolean(ham.paylas),
+    hedefMakine: String(ham.hedefMakine || "").trim().slice(0, 128),
   };
 }
 
@@ -233,24 +289,42 @@ const KENAR_MM = 2.5;
 const SATIR_ARASI_MM = 1.1;
 const AYIRAC_BOSLUK_MM = 1.4;
 
-/** Ortak yerleşim: her satırı sırayla konumlandırıp çizim geri çağrısına verir. */
-function yerlestir(etiket, ayar, { yaz, ayirac }) {
+/**
+ * Ortak yerleşim: logoyu çizer, sonra her satırı yazı bloğu içinde sırayla
+ * konumlandırıp çizim geri çağrısına verir. Yazı bloğunun yeri, genişliği ve
+ * yazı boyutu ayardan değiştirilebilir; boş bırakılırsa etiketi kenardan doldurur.
+ */
+function yerlestir(etiket, ayar, { yaz, ayirac, logo }) {
   const olcek = olcekBul(ayar.yukseklikMm);
+  const yazi = olcek * (ayar.yaziOlcek ?? 1);
   const genislik = nokta(ayar.genislikMm, ayar.dpi);
   const yukseklik = nokta(ayar.yukseklikMm, ayar.dpi);
   const kenar = nokta(KENAR_MM * olcek, ayar.dpi);
-  const kullanilir = genislik - kenar * 2;
-  const aralik = nokta(SATIR_ARASI_MM * olcek, ayar.dpi);
+  const x0 = ayar.metinXMm == null ? kenar : nokta(ayar.metinXMm, ayar.dpi);
+  const sag = ayar.metinGenislikMm == null
+    ? genislik - kenar
+    : Math.min(genislik, x0 + nokta(ayar.metinGenislikMm, ayar.dpi));
+  const kullanilir = Math.max(sag - x0, nokta(5, ayar.dpi));
+  const aralik = nokta(SATIR_ARASI_MM * yazi, ayar.dpi);
   const { ust, alt } = satirlar(etiket);
 
-  let y = kenar;
+  if (ayar.logo && logo) {
+    logo({
+      x: nokta(ayar.logo.xMm, ayar.dpi),
+      y: nokta(ayar.logo.yMm, ayar.dpi),
+      genislik: nokta(ayar.logo.genislikMm, ayar.dpi),
+      yukseklik: nokta(ayar.logo.yukseklikMm, ayar.dpi),
+    });
+  }
+
+  let y = ayar.metinYMm == null ? kenar : nokta(ayar.metinYMm, ayar.dpi);
   const blokBas = (bloklar) => {
     for (const satir of bloklar) {
-      const h = nokta(BOYUTLAR[satir.boyut].mm * olcek, ayar.dpi);
+      const h = nokta(BOYUTLAR[satir.boyut].mm * yazi, ayar.dpi);
       const enFazlaKarakter = yaz.karakterSigar(h, kullanilir);
       for (const parca of sardir(satir.metin, enFazlaKarakter, satir.sar || 1)) {
         if (y + h > yukseklik - kenar) return false;   // etikete sığmayan satır basılmaz
-        yaz.satir({ metin: parca, x: kenar, y, h, kalin: satir.kalin });
+        yaz.satir({ metin: parca, x: x0, y, h, kalin: satir.kalin });
         y += h + aralik;
       }
     }
@@ -258,16 +332,21 @@ function yerlestir(etiket, ayar, { yaz, ayirac }) {
   };
 
   if (blokBas(ust) && alt.length) {
-    const bosluk = nokta(AYIRAC_BOSLUK_MM * olcek, ayar.dpi);
+    const bosluk = nokta(AYIRAC_BOSLUK_MM * yazi, ayar.dpi);
     const cizgiY = y + Math.round(bosluk / 2);
     const kalinlik = Math.max(2, nokta(0.3, ayar.dpi));
     if (cizgiY + kalinlik < yukseklik - kenar) {
-      ayirac({ x: kenar, y: cizgiY, genislik: kullanilir, kalinlik });
+      ayirac({ x: x0, y: cizgiY, genislik: kullanilir, kalinlik });
       y = cizgiY + kalinlik + bosluk;
     }
     blokBas(alt);
   }
 }
+
+// TSPL BITMAP ikili veri ister; komut metni kod sayfasıyla kodlanırken bu
+// işaretin yerine bayt olarak konur. Kontrol karakteri içerdiği için metinden
+// (temizle() bunları atar) gelemez.
+const BITMAP_ISARETI = "\u0000BITMAP\u0000";
 
 function zplUret(etiket, ayar) {
   const genislik = nokta(ayar.genislikMm, ayar.dpi);
@@ -289,6 +368,14 @@ function zplUret(etiket, ayar) {
       },
     },
     ayirac: ({ x, y, genislik: g, kalinlik }) => parcalar.push(`^FO${x},${y}^GB${g},${kalinlik},${kalinlik}^FS`),
+    logo: ({ x, y }) => {
+      const bitmap = ayar.logo?.bitmap;
+      if (!bitmap) return;
+      // ^GF A (ASCII hex): 1 = siyah nokta.
+      const hex = Buffer.from(bitmap.veri, "base64").toString("hex").toUpperCase();
+      const bayt = hex.length / 2;
+      parcalar.push(`^FO${x},${y}^GFA,${bayt},${bayt},${Math.ceil(bitmap.genislik / 8)},${hex}^FS`);
+    },
   });
 
   parcalar.push(`^PQ${ayar.adet}`, `^XZ`, ``);
@@ -323,6 +410,11 @@ function tsplUret(etiket, ayar) {
       },
     },
     ayirac: ({ x, y, genislik, kalinlik }) => parcalar.push(`BAR ${x},${y},${genislik},${kalinlik}`),
+    logo: ({ x, y }) => {
+      const bitmap = ayar.logo?.bitmap;
+      if (!bitmap) return;
+      parcalar.push(`BITMAP ${x},${y},${Math.ceil(bitmap.genislik / 8)},${bitmap.yukseklik},0,${BITMAP_ISARETI}`);
+    },
   });
 
   parcalar.push(`PRINT 1,${ayar.adet}`, ``);
@@ -355,6 +447,16 @@ function belgeUret(etiket, hamAyar) {
     },
   });
 
+  const logo = ayar.logo
+    ? {
+      veri: ayar.logo.resim.slice(ayar.logo.resim.indexOf(",") + 1),
+      xMm: ayar.logo.xMm,
+      yMm: ayar.logo.yMm,
+      genislikMm: ayar.logo.genislikMm,
+      yukseklikMm: ayar.logo.yukseklikMm,
+    }
+    : null;
+
   return {
     ayar,
     belge: {
@@ -363,15 +465,27 @@ function belgeUret(etiket, hamAyar) {
       adet: ayar.adet,
       satirlar,
       ayirac,
+      logo,
     },
   };
 }
 
+/** TSPL BITMAP'te 0 = siyah nokta; arayüzün ürettiği bitmap ters çevrilir. */
+const tsplBitmapBaytlari = (bitmap) => Buffer.from(Buffer.from(bitmap.veri, "base64").map((b) => ~b & 0xff));
+
 /** Etiket + ayar → yazıcıya ham gönderilecek Buffer. */
 function uret(etiket, hamAyar) {
   const ayar = ayarNormalize(hamAyar);
-  const metin = ayar.dil === "TSPL" ? tsplUret(etiket, ayar) : zplUret(etiket, ayar);
-  return { ayar, metin, veri: ayar.asciiyeIndir ? Buffer.from(metin, "ascii") : cp857(metin) };
+  const komut = ayar.dil === "TSPL" ? tsplUret(etiket, ayar) : zplUret(etiket, ayar);
+  const kodla = (m) => (ayar.asciiyeIndir ? Buffer.from(m, "ascii") : cp857(m));
+  const [once, sonra] = komut.split(BITMAP_ISARETI);
+  if (sonra === undefined) return { ayar, metin: komut, veri: kodla(komut) };
+  const bitmap = tsplBitmapBaytlari(ayar.logo.bitmap);
+  return {
+    ayar,
+    metin: komut.replace(BITMAP_ISARETI, `<${bitmap.length} bayt logo>`),
+    veri: Buffer.concat([kodla(once), bitmap, kodla(sonra)]),
+  };
 }
 
 /** Birden çok etiketi tek işe birleştirir — yazıcı sırayla basar. */
@@ -387,7 +501,7 @@ function coklUret(etiketler, hamAyar) {
 
 const ORNEK_ETIKET = {
   servisNo: "SRV-00001",
-  musteri: "ÖZDEMİRKAYA GIDA SAN. TİC. LTD. ŞTİ.",
+  musteri: "ÖRNEK BİLİŞİM SAN. TİC. LTD. ŞTİ.",
   telefon: "0532 123 45 67",
   cins: "Yazıcı",
   marka: "HP",
@@ -401,6 +515,6 @@ const ORNEK_ETIKET = {
 module.exports = {
   VARSAYILAN, BOYUTLAR, ORNEK_ETIKET, REFERANS_YUKSEKLIK_MM,
   olcekBul, tsplFontSec,
-  ayarNormalize, temizle, asciiyeIndir, cp857, sardir, satirlar, belgeUret,
+  ayarNormalize, logoNormalize, temizle, asciiyeIndir, cp857, sardir, satirlar, belgeUret,
   zplUret, tsplUret, uret, coklUret,
 };

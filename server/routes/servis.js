@@ -5,6 +5,8 @@ const vega = require("../lib/vega");
 const cariCache = require("../lib/cariCache");
 const { cariTelefonDegeri, cariTelefonu, telefonKolonlariniSirala } = require("../lib/telefon");
 const { rvCevir } = require("../lib/ticketKurallari");
+const { disaAktar: whatsappDisaAktar } = require("../lib/whatsappBildirim");
+const { SERVIS_MESAJ_SUTUNLARI } = require("../lib/servisMesaj");
 
 const router = express.Router();
 
@@ -24,6 +26,10 @@ const GRUPLAR = {
 /** Gönderim türü → kayıt durumu. */
 const GONDERIM_DURUMU = { ARIZA: "ARIZADA", KARGO: "KARGODA" };
 const GONDEREN_ANAHTARI = "ADRES_ETIKETI_GONDEREN";
+const TASARIM_ANAHTARI = "ADRES_ETIKETI_TASARIM";
+/** Logo base64 olarak tasarımla birlikte saklanır; istek gövdesi sınırının (2 MB) altında kalmalı. */
+const TASARIM_EN_FAZLA_KARAKTER = 1_500_000;
+const LOGO_DESENI = /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
 
 const SERVIS_SUTUNLARI = `ID, SERVISNO, FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, TELEFON,
   YETKILI, DURUM, NOTU, KABULTARIHI, TESLIMTARIHI, TESLIMALAN,
@@ -108,14 +114,20 @@ async function gruplayarakAl(tablo, sutunlar, siralama, servisIdler) {
   return harita;
 }
 
-/** Kayıtlara cihazları ve gönderim geçmişini (en yeni başta) ekler. */
+/** Kayıtlara cihazları, gönderim geçmişini ve WhatsApp mesajlarını (en yeni başta) ekler. */
 async function ayrintiEkle(kayitlar) {
   const idler = kayitlar.map((k) => k.ID);
-  const [cihazlar, gonderimler] = await Promise.all([
+  const [cihazlar, gonderimler, mesajlar] = await Promise.all([
     gruplayarakAl("CIHAZLAR", CIHAZ_SUTUNLARI, "SERVISID, SIRA, ID", idler),
     gruplayarakAl("SERVISGONDERIMLERI", GONDERIM_SUTUNLARI, "SERVISID, TARIH DESC, ID DESC", idler),
+    gruplayarakAl("WHATSAPPMESAJLARI", SERVIS_MESAJ_SUTUNLARI, "SERVISID, ID DESC", idler),
   ]);
-  return kayitlar.map((k) => ({ ...k, cihazlar: cihazlar.get(k.ID) || [], gonderimler: gonderimler.get(k.ID) || [] }));
+  return kayitlar.map((k) => ({
+    ...k,
+    cihazlar: cihazlar.get(k.ID) || [],
+    gonderimler: gonderimler.get(k.ID) || [],
+    whatsappMesajlari: (mesajlar.get(k.ID) || []).map(whatsappDisaAktar),
+  }));
 }
 
 async function tekKayit(id) {
@@ -230,9 +242,11 @@ router.post("/gonderen", async (req, res, next) => {
   try {
     const gonderen = {
       ad: kirp(req.body?.ad, 200),
+      yetkili: kirp(req.body?.yetkili, 100),
       adres: kirp(req.body?.adres, 600),
       il: kirp(req.body?.il, 100),
       telefon: kirp(req.body?.telefon, 40),
+      eposta: kirp(req.body?.eposta, 120),
     };
     if (!gonderen.ad) return res.status(400).json({ ok: false, mesaj: "Gönderen adı zorunlu." });
     const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
@@ -251,9 +265,60 @@ router.post("/gonderen", async (req, res, next) => {
   }
 });
 
+/**
+ * Adres etiketi tasarımı: öğe konumları (mm), yazı boyutları, logo. Tüm
+ * bilgisayarlar aynı etiketi basar. Varsayılanlar ve sınırlar arayüzdeki
+ * lib/adresEtiketi.js'dedir; burada yalnız yapı, boyut ve logo biçimi denetlenir.
+ */
+router.get("/adres-etiketi/tasarim", async (req, res, next) => {
+  try {
+    const r = await db.ticket().request().input("a", sql.NVarChar(60), TASARIM_ANAHTARI)
+      .query(`SELECT DEGER, GUNCELLEYEN, GUNCELLEMETARIHI FROM dbo.ORTAKAYARLAR WHERE ANAHTAR = @a`);
+    const kayit = r.recordset[0];
+    let tasarim = null;
+    try {
+      tasarim = kayit?.DEGER ? JSON.parse(kayit.DEGER) : null;
+    } catch {
+      /* bozuk ayar → arayüz varsayılan tasarımı kullanır */
+    }
+    res.json({ ok: true, tasarim, guncelleyen: kayit?.GUNCELLEYEN || null, guncellemeTarihi: kayit?.GUNCELLEMETARIHI || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/adres-etiketi/tasarim", async (req, res, next) => {
+  try {
+    const tasarim = req.body?.tasarim;
+    if (!tasarim || typeof tasarim !== "object" || Array.isArray(tasarim) || typeof tasarim.ogeler !== "object") {
+      return res.status(400).json({ ok: false, mesaj: "Etiket tasarımı geçersiz." });
+    }
+    if (tasarim.logo != null && (typeof tasarim.logo !== "string" || !LOGO_DESENI.test(tasarim.logo))) {
+      return res.status(400).json({ ok: false, mesaj: "Logo PNG, JPG, WEBP veya SVG resmi olmalı." });
+    }
+    const deger = JSON.stringify(tasarim);
+    if (deger.length > TASARIM_EN_FAZLA_KARAKTER) {
+      return res.status(413).json({ ok: false, mesaj: "Logo çok büyük. Daha küçük bir resim seçin." });
+    }
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+    await db.ticket().request()
+      .input("a", sql.NVarChar(60), TASARIM_ANAHTARI)
+      .input("d", sql.NVarChar(sql.MAX), deger)
+      .input("k", sql.NVarChar(60), kullanici).query(`
+        MERGE dbo.ORTAKAYARLAR WITH (HOLDLOCK) AS H
+        USING (SELECT @a AS ANAHTAR) AS K ON H.ANAHTAR = K.ANAHTAR
+        WHEN MATCHED THEN UPDATE SET DEGER = @d, GUNCELLEYEN = @k, GUNCELLEMETARIHI = GETDATE()
+        WHEN NOT MATCHED THEN INSERT (ANAHTAR, DEGER, GUNCELLEYEN) VALUES (@a, @d, @k);
+      `);
+    res.json({ ok: true, tasarim, guncelleyen: kullanici, guncellemeTarihi: new Date() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** Ayar yoksa gönderen, Vega firma kartından (TBLFIRMA) önerilir. */
 async function vegaFirmaBilgisi(firma) {
-  const bos = { ad: "", adres: "", il: "", telefon: "" };
+  const bos = { ad: "", yetkili: "", adres: "", il: "", telefon: "", eposta: "" };
   const ind = parseInt(firma, 10);
   if (!db.vega() || !Number.isInteger(ind)) return bos;
   try {
@@ -267,6 +332,8 @@ async function vegaFirmaBilgisi(firma) {
         al("APARTMANNO") && `No: ${al("APARTMANNO")}`, al("DAIRE") && `D: ${al("DAIRE")}`].filter(Boolean).join(" "),
       il: benzersizBirlestir([al("ILCE"), al("SEHIR"), al("IL")], " / "),
       telefon: al("TELEFON1") || al("TELEFON") || al("TEL1"),
+      yetkili: "",
+      eposta: al("EMAIL") || al("EPOSTA") || al("MAIL"),
     };
   } catch {
     return bos;
@@ -640,4 +707,6 @@ module.exports.GONDERIM_DURUMU = GONDERIM_DURUMU;
 module.exports.SERVIS_SUTUNLARI = SERVIS_SUTUNLARI;
 module.exports.CIHAZ_SUTUNLARI = CIHAZ_SUTUNLARI;
 module.exports.disaAktar = disaAktar;
+module.exports.tekKayit = tekKayit;
+module.exports.gecerliId = gecerliId;
 module.exports.gonderimNormalize = gonderimNormalize;

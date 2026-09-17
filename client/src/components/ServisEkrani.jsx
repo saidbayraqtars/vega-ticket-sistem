@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { siralaFiltrele, tarihDegeri, useTablo } from "../lib/tablo";
-import { yazdir, adresEtiketiHtml, barkodSayfasiHtml } from "../lib/yazdir";
+import { yazdir, adresEtiketiYazdir, barkodSayfasiHtml } from "../lib/yazdir";
 import Arama from "./Arama";
 import EtiketOnizleme from "./EtiketOnizleme";
 import TabloBaslik from "./TabloBaslik";
 import GonderimPenceresi from "./GonderimPenceresi";
+import AdresEtiketiTasarimi from "./AdresEtiketiTasarimi";
+import { EtiketIsiCubugu, useEtiketIsi } from "./EtiketIsiDurumu";
+import Modal from "./Modal";
+import ServisWhatsappPenceresi from "./ServisWhatsappPenceresi";
+import ServisMesajSablonlari from "./ServisMesajSablonlari";
+import { DURUM_MESAJ_TURU, telefonGoster, turAdi } from "../lib/servisMesaj";
 
 const CINSLER = ["Yazıcı", "Bilgisayar", "Dizüstü", "Monitör", "Tarayıcı", "Yazarkasa", "El Terminali", "Diğer"];
 /**
@@ -37,6 +43,17 @@ const tarihSaat = (d) => (d ? new Date(d).toLocaleString("tr-TR", { dateStyle: "
 const tarihTR = (d) => (d ? new Date(d).toLocaleDateString("tr-TR") : "");
 const cihazOzeti = (k) => k.cihazlar.map((c) => [c.CINS, c.MARKA, c.MODEL].filter(Boolean).join(" ")).join(" · ");
 const sonGonderim = (k) => k.gonderimler?.[0] || null;
+// Tercih bu bilgisayarda hatırlanır; mesaj yine de pencerede onaylanmadan gitmez.
+const KABUL_MESAJI_ANAHTARI = "vt.servisKabulWhatsapp";
+const tercihOku = () => { try { return localStorage.getItem(KABUL_MESAJI_ANAHTARI) === "1"; } catch { return false; } };
+const tercihYaz = (acik) => { try { localStorage.setItem(KABUL_MESAJI_ANAHTARI, acik ? "1" : "0"); } catch { /* tercih kaydedilemezse de çalışır */ } };
+const WA_ROZETLERI = {
+  GONDERILDI: { ad: "Gönderildi", sinif: "bg-emerald-100 text-emerald-800" },
+  SIRADA: { ad: "Gönderiliyor", sinif: "bg-blue-100 text-blue-800" },
+  HATA: { ad: "Gönderilemedi", sinif: "bg-red-100 text-red-800" },
+  IPTAL: { ad: "İptal", sinif: "bg-gray-200 text-gray-700" },
+};
+const waKodu = (m) => (m.gonderildi ? "GONDERILDI" : m.sirada ? "SIRADA" : m.iptal ? "IPTAL" : "HATA");
 
 function sutunlarOlustur(grup) {
   const sutunlar = [
@@ -81,6 +98,11 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
   const [mesaj, setMesaj] = useState(null);
   const [mesgul, setMesgul] = useState(false);
   const [etiketAyar, setEtiketAyar] = useState(null);
+  const [etiketUzak, setEtiketUzak] = useState(null);
+  const [waPencere, setWaPencere] = useState(null);
+  const [oneri, setOneri] = useState(null);
+  const [sablonlarAcik, setSablonlarAcik] = useState(false);
+  const [tasarimAcik, setTasarimAcik] = useState(false);
   const tablo = useTablo({ sirala: "KABULTARIHI", yon: "desc" });
   const sutunlar = useMemo(() => sutunlarOlustur(grup), [grup]);
 
@@ -99,19 +121,43 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
   }, [firmaNo, grup]);
 
   useEffect(() => { listeYukle(); }, [listeYukle]);
+  // Etiket başka bilgisayara gidiyorsa onun çevrim içi durumu başlıkta görünsün.
   useEffect(() => {
-    api.etiketAyar().then((r) => setEtiketAyar(r.ayar)).catch(() => setEtiketAyar(null));
+    let iptal = false;
+    const yukle = () => api.etiketAyar()
+      .then((r) => { if (!iptal) { setEtiketAyar(r.ayar); setEtiketUzak(r.uzak || null); } })
+      .catch(() => { if (!iptal) setEtiketAyar(null); });
+    yukle();
+    const zamanlayici = setInterval(yukle, 30000);
+    return () => { iptal = true; clearInterval(zamanlayici); };
   }, []);
 
   const gorunen = useMemo(() => siralaFiltrele(kayitlar, sutunlar, tablo), [kayitlar, sutunlar, tablo.sirala, tablo.yon, tablo.filtreler]);
   // Durumu değişip bu sekmeden çıkan kayıt, kullanıcı başka satır seçene kadar sağda kalır.
   const secili = kayitlar.find((k) => k.ID === seciliId) || (seciliYedek?.ID === seciliId ? seciliYedek : null);
+  const siradaMesajVar = Boolean(secili?.whatsappMesajlari?.some((m) => m.sirada));
+
+  const kayitGuncelle = useCallback((kayit) => {
+    setKayitlar((liste) => liste.map((k) => (k.ID === kayit.ID ? kayit : k)));
+    setSeciliYedek(kayit);
+  }, []);
+
+  // Sıradaki mesajın sonucu (gönderildi / hata) ekranda kendiliğinden görünsün.
+  useEffect(() => {
+    if (!siradaMesajVar || !seciliId) return undefined;
+    const zamanlayici = setInterval(() => {
+      api.servisDetay(seciliId).then((r) => kayitGuncelle(r.kayit)).catch(() => { /* sonraki turda denenir */ });
+    }, 3000);
+    return () => clearInterval(zamanlayici);
+  }, [siradaMesajVar, seciliId, kayitGuncelle]);
+
   const sekmeAdedi = (s) => (s.durumlar ? s.durumlar : DURUMLAR.map((d) => d.kod)).reduce((t, d) => t + (adetler[d] || 0), 0);
 
   async function calistir(is, basari) {
     setMesgul(true);
     setHata(null);
     setMesaj(null);
+    setOneri(null);
     try {
       const r = await is();
       if (basari) setMesaj(basari);
@@ -134,6 +180,7 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
       setHata("En az bir cihaz için marka, model, seri no veya arıza bilgisi girin.");
       return;
     }
+    const kabulMesajiGonder = Boolean(yeni.whatsapp);
     const r = await calistir(
       () => api.servisOlustur({
         FIRMANO: firmaNo,
@@ -158,6 +205,8 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
     // Etiket kendiliğinden basılmaz: her kayıtta kâğıt harcanmasın diye
     // baskıyı kullanıcı başlatır.
     setMesaj(`${r.kayit.SERVISNO} açıldı. Etiket için sağdaki “Etiket bas” düğmesini kullanın.`);
+    setOneri({ kayit: r.kayit, tur: "KABUL" });
+    if (kabulMesajiGonder) setWaPencere({ kayit: r.kayit, tur: "KABUL" });
   }
 
   function durumDegistir(kayit, durum) {
@@ -169,21 +218,56 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
       const r = await api.servisGuncelle(kayit.ID, { RV: kayit.RV, DURUM: durum.kod });
       setSeciliYedek(r.kayit);
       await listeYukle();
+      if (["HAZIR", "TESLIM"].includes(durum.kod)) setOneri({ kayit: r.kayit, tur: DURUM_MESAJ_TURU[durum.kod] });
     }, `${kayit.SERVISNO}: ${durum.ad}.`);
   }
 
+  /** Mesaj kartındaki düzenle / tekrar gönder / iptal. */
+  function waMesajIslem(m, islem, metin) {
+    const basari = {
+      duzenle: "WhatsApp mesajı güncellendi.",
+      tekrar: "WhatsApp mesajı yeniden gönderim sırasına alındı.",
+      iptal: "WhatsApp gönderimi iptal edildi.",
+    }[islem];
+    return calistir(async () => {
+      try {
+        const r = islem === "duzenle" ? await api.servisWhatsappMesajGuncelle(m.id, metin)
+          : islem === "tekrar" ? await api.servisWhatsappTekrar(m.id, metin)
+            : await api.servisWhatsappIptal(m.id);
+        kayitGuncelle(r.kayit);
+        return r;
+      } catch (err) {
+        // Başka biri aynı anda değiştirdiyse mesajın güncel hali gösterilsin.
+        if (err.govde?.kayit) kayitGuncelle(err.govde.kayit);
+        throw err;
+      }
+    }, basari);
+  }
+
+  // Başka bilgisayara gönderilen etiket basılınca "etiket basıldı" bilgisi listede tazelenir.
+  const [etiketIsi, setEtiketIsi] = useEtiketIsi((is) => {
+    if (!is.basildi) return;
+    listeYukle();
+    if (seciliId) api.servisDetay(seciliId).then((r) => kayitGuncelle(r.kayit)).catch(() => { /* liste zaten tazelendi */ });
+  });
+
   const etiketBas = (govde, basari) =>
     calistir(async () => {
-      await api.etiketBas(govde);
+      const r = await api.etiketBas(govde);
+      if (r.kuyruk) {
+        setEtiketIsi(r.is);
+        return;
+      }
       await listeYukle();
-    }, basari);
+      setMesaj(basari);
+    });
 
-  async function adresEtiketiYazdir(kayit, g) {
+  async function adresEtiketiBas(kayit, g) {
     setHata(null);
     try {
-      const r = await api.servisGonderen(firmaNo);
+      const [r, t] = await Promise.all([api.servisGonderen(firmaNo), api.servisAdresTasarim()]);
       if (!r.gonderen?.ad) setMesaj("Etiketteki gönderen boş. “Arızaya gönder / Kargoya ver” penceresinden gönderen bilgisini kaydedin.");
-      await yazdir(`${kayit.SERVISNO} adres etiketi`, adresEtiketiHtml({ kayit, gonderim: g, gonderen: r.gonderen }));
+      await adresEtiketiYazdir({ kayit, gonderim: g, gonderen: r.gonderen, tasarim: t.tasarim });
     } catch (err) {
       setHata(err.message);
     }
@@ -204,7 +288,7 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-3 border-b bg-white px-3 py-2">
-        <button onClick={() => { setYeni({ cari: null, yetkili: "", telefon: "", notu: "", cihazlar: [bosCihaz()] }); setHata(null); setMesaj(null); }}
+        <button onClick={() => { setYeni({ cari: null, yetkili: "", telefon: "", notu: "", cihazlar: [bosCihaz()], whatsapp: tercihOku() }); setHata(null); setMesaj(null); setOneri(null); }}
           className="rounded bg-blue-600 px-4 py-1.5 text-[12px] font-semibold text-white">
           Yeni servis kabulü
         </button>
@@ -212,8 +296,15 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
           {yukleniyor ? "yükleniyor…" : gorunen.length === kayitlar.length ? `${kayitlar.length} kayıt` : `${gorunen.length} / ${kayitlar.length} kayıt`}
         </span>
         {tablo.filtreVar && <button onClick={tablo.filtreleriTemizle} className="text-[12px] text-blue-700 hover:underline">Filtreleri temizle</button>}
-        <button onClick={listeYukle} className="ml-auto rounded border px-2 py-0.5 text-[12px]">Tazele</button>
-        {etiketAyar && !etiketAyar.yazici && (
+        <button onClick={() => setTasarimAcik(true)} className="ml-auto rounded border px-2 py-0.5 text-[12px]">A5 etiket tasarımı</button>
+        <button onClick={() => setSablonlarAcik(true)} className="rounded border px-2 py-0.5 text-[12px]">WhatsApp şablonları</button>
+        <button onClick={listeYukle} className="rounded border px-2 py-0.5 text-[12px]">Tazele</button>
+        {etiketUzak ? (
+          <span className={`rounded px-2 py-1 text-[11px] ${etiketUzak.cevrimici ? "bg-emerald-100 text-emerald-900" : "bg-red-100 text-red-900"}`}
+            title="Ayarlar ekranındaki “Etiket yazıcısı” bölümünden değiştirilebilir.">
+            Etiketler {etiketUzak.makine} bilgisayarında basılır{etiketUzak.cevrimici ? "" : " — şu an çevrim dışı"}
+          </span>
+        ) : etiketAyar && !etiketAyar.yazici && (
           <span className="rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-900"
             title="Ayarlar ekranından etiket yazıcısını seçebilirsiniz.">
             Windows varsayılan yazıcısına basılacak
@@ -232,13 +323,24 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
         </div>
       )}
 
-      {mesaj && <div className="bg-emerald-50 px-3 py-1.5 text-[12px] text-emerald-900">{mesaj}</div>}
+      {mesaj && (
+        <div className="flex items-center gap-3 bg-emerald-50 px-3 py-1.5 text-[12px] text-emerald-900">
+          <span>{mesaj}</span>
+          {oneri && (
+            <button onClick={() => setWaPencere(oneri)}
+              className="rounded border border-emerald-400 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100">
+              Müşteriye WhatsApp ile bildir: {turAdi(oneri.tur)}
+            </button>
+          )}
+        </div>
+      )}
       {hata && <div className="bg-red-50 px-3 py-1.5 text-[12px] text-red-800">{hata}</div>}
+      <EtiketIsiCubugu is={etiketIsi} onDegisti={setEtiketIsi} onKapat={() => setEtiketIsi(null)} />
 
       {yeni ? (
         <YeniKabul
           firmaNo={firmaNo} donemNo={donemNo} yeni={yeni} setYeni={setYeni}
-          etiketAyar={etiketAyar} mesgul={mesgul}
+          etiketAyar={etiketUzak?.ayar || etiketAyar} etiketUzak={etiketUzak} mesgul={mesgul}
           onKaydet={kabulKaydet} onVazgec={() => setYeni(null)}
         />
       ) : (
@@ -271,7 +373,9 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
               <ServisDetay
                 kayit={secili} mesgul={mesgul}
                 onDurum={durumDegistir} onEtiket={etiketBas}
-                onAdresEtiketi={adresEtiketiYazdir} onBarkod={barkodYazdir} onTakipKaydet={takipKaydet}
+                onAdresEtiketi={adresEtiketiBas} onBarkod={barkodYazdir} onTakipKaydet={takipKaydet}
+                onWhatsapp={(k) => setWaPencere({ kayit: k, tur: DURUM_MESAJ_TURU[k.DURUM] || "GENEL" })}
+                onWaMesajIslem={waMesajIslem}
               />
             ) : (
               <div className="flex h-full items-center justify-center px-6 text-center text-gray-500">
@@ -293,14 +397,38 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
             // Gönderilen kayıt kendi listesinde görünsün.
             setGrup(GONDERIM_TURU[tur].grup);
             setMesaj(`${kayit.SERVISNO}: ${tur === "ARIZA" ? "arızaya gönderildi" : "kargoya verildi"}.`);
+            setOneri({ kayit, tur });
           }}
         />
+      )}
+
+      {waPencere && (
+        <ServisWhatsappPenceresi
+          kayit={waPencere.kayit} tur={waPencere.tur}
+          onKapat={() => setWaPencere(null)}
+          onGonderildi={(kayit, bilgi) => {
+            setWaPencere(null);
+            setOneri(null);
+            setSeciliId(kayit.ID);
+            kayitGuncelle(kayit);
+            setHata(null);
+            setMesaj(`${kayit.SERVISNO}: ${bilgi || "WhatsApp mesajı gönderim sırasına alındı."}`);
+          }}
+        />
+      )}
+
+      {tasarimAcik && <AdresEtiketiTasarimi firmaNo={firmaNo} onKapat={() => setTasarimAcik(false)} />}
+
+      {sablonlarAcik && (
+        <Modal baslik="Servis WhatsApp şablonları" onKapat={() => setSablonlarAcik(false)} genislik={720}>
+          <div className="rounded border bg-white p-4"><ServisMesajSablonlari /></div>
+        </Modal>
       )}
     </div>
   );
 }
 
-function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, mesgul, onKaydet, onVazgec }) {
+function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, etiketUzak, mesgul, onKaydet, onVazgec }) {
   const cihazDegistir = (i, yama) =>
     setYeni((o) => ({ ...o, cihazlar: o.cihazlar.map((c, j) => (j === i ? { ...c, ...yama } : c)) }));
 
@@ -371,7 +499,7 @@ function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, mesgul, onKayd
           <div className="mb-2 text-[13px] font-semibold">3 · Etiket önizleme</div>
           <div className="flex flex-wrap gap-3">
             {yeni.cihazlar.map((c, i) => (
-              <EtiketOnizleme key={i}
+              <EtiketOnizleme key={i} ayar={etiketAyar}
                 genislikMm={etiketAyar?.genislikMm || 80} yukseklikMm={etiketAyar?.yukseklikMm || 40}
                 etiket={{
                   servisNo: "SRV-……",
@@ -386,9 +514,17 @@ function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, mesgul, onKayd
           <p className="mt-2 text-[11px] text-gray-500">
             Servis numarası kayıt açılınca oluşur. Etiket kendiliğinden basılmaz; kayıttan sonra
             açılan detayda cihaz başına veya toptan bastırırsınız. Baskı{" "}
-            {etiketAyar?.yazici ? `“${etiketAyar.yazici}”` : "Windows varsayılan"} yazıcısına gider.
+            {etiketUzak ? `${etiketUzak.makine} bilgisayarındaki “${etiketUzak.yazici || "varsayılan"}”`
+              : etiketAyar?.yazici ? `“${etiketAyar.yazici}”` : "Windows varsayılan"} yazıcısına gider.
           </p>
         </div>
+
+        <label className="mb-3 flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">
+          <input type="checkbox" checked={Boolean(yeni.whatsapp)}
+            onChange={(e) => { tercihYaz(e.target.checked); setYeni((o) => ({ ...o, whatsapp: e.target.checked })); }} />
+          Kayıttan sonra müşteriye WhatsApp kabul mesajı gönder
+          <span className="text-[11px] text-emerald-800/70">— mesaj penceresi açılır, metni görüp onaylarsınız</span>
+        </label>
 
         <div className="flex gap-2">
           <button onClick={onKaydet} disabled={mesgul || !yeni.cari}
@@ -403,7 +539,7 @@ function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, mesgul, onKayd
   );
 }
 
-function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarkod, onTakipKaydet }) {
+function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarkod, onTakipKaydet, onWhatsapp, onWaMesajIslem }) {
   return (
     <div className="p-4">
       <div className="rounded border bg-white p-3">
@@ -429,7 +565,20 @@ function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarko
             </button>
           ))}
         </div>
+        <button disabled={mesgul} onClick={() => onWhatsapp(kayit)}
+          className="mt-2 rounded bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-40">
+          WhatsApp mesajı gönder…
+        </button>
       </div>
+
+      {kayit.whatsappMesajlari?.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[12px] font-semibold">WhatsApp mesajları ({kayit.whatsappMesajlari.length})</div>
+          {kayit.whatsappMesajlari.map((m) => (
+            <WhatsappMesajKarti key={`${m.id}-${m.durum}-${m.metin}`} mesaj={m} mesgul={mesgul} onIslem={onWaMesajIslem} />
+          ))}
+        </div>
+      )}
 
       {kayit.gonderimler?.length > 0 && (
         <div className="mt-3">
@@ -476,6 +625,66 @@ function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarko
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function WhatsappMesajKarti({ mesaj: m, mesgul, onIslem }) {
+  const [duzenle, setDuzenle] = useState(false);
+  const [metin, setMetin] = useState(m.metin || "");
+  const rozet = WA_ROZETLERI[waKodu(m)];
+  // Görünen IPTAL, süresi dolmuş ama henüz kapatılmamış BEKLIYOR satırı da olabilir.
+  const tekrarGonderilebilir = m.durum === "HATA" || m.durum === "IPTAL";
+  const iptalEdilebilir = m.durum === "BEKLIYOR" || m.durum === "HATA";
+  const duzenlenebilir = tekrarGonderilebilir || m.durum === "BEKLIYOR";
+
+  async function islem(tur, yeniMetin) {
+    if (await onIslem(m, tur, yeniMetin)) setDuzenle(false);
+  }
+
+  return (
+    <div className="mt-1.5 rounded border bg-white p-3 text-[12px]">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold">{turAdi(m.tur)}</span>
+        <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${rozet.sinif}`}>{rozet.ad}</span>
+        <span className="ml-auto text-[11px] text-gray-500">{tarihSaat(m.gonderimTarihi || m.kayitTarihi)} · {m.gonderen || "—"}</span>
+      </div>
+      <div className="mt-1 text-[11px] text-gray-600">
+        {m.telefonlar.map((t) => (
+          <span key={t} className="mr-2 font-mono" title={m.gonderilenler.includes(t) ? "Bu numaraya gönderildi" : undefined}>
+            {telefonGoster(t)}{m.gonderilenler.includes(t) ? " ✓" : ""}
+          </span>
+        ))}
+      </div>
+      {duzenle ? (
+        <>
+          <textarea value={metin} onChange={(e) => setMetin(e.target.value)} maxLength={1000} rows={4} autoFocus
+            className="mt-1.5 w-full resize-y rounded border border-[#c7ccd4] px-2 py-1.5 outline-none focus:border-emerald-500" />
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {m.durum === "BEKLIYOR" && (
+              <button disabled={mesgul || !metin.trim()} onClick={() => islem("duzenle", metin)}
+                className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-40">Kaydet</button>
+            )}
+            {tekrarGonderilebilir && (
+              <button disabled={mesgul || !metin.trim()} onClick={() => islem("tekrar", metin)}
+                className="rounded bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-40">Kaydet ve tekrar gönder</button>
+            )}
+            <button onClick={() => { setDuzenle(false); setMetin(m.metin || ""); }}
+              className="rounded border border-[#c7ccd4] px-2.5 py-1 text-[11px]">Vazgeç</button>
+            <span className="ml-auto text-[10px] text-gray-400">{metin.length}/1000</span>
+          </div>
+        </>
+      ) : (
+        <div className="mt-1.5 whitespace-pre-line rounded bg-gray-50 px-2 py-1.5">{m.metin}</div>
+      )}
+      {!m.gonderildi && !m.sirada && m.mesaj && <div className="mt-1 text-[11px] text-red-700">{m.mesaj}</div>}
+      {!duzenle && (duzenlenebilir || iptalEdilebilir) && (
+        <div className="mt-1.5 flex gap-3 text-[11px]">
+          {duzenlenebilir && <button disabled={mesgul} onClick={() => setDuzenle(true)} className="text-blue-700 hover:underline disabled:opacity-40">düzenle</button>}
+          {tekrarGonderilebilir && <button disabled={mesgul} onClick={() => islem("tekrar")} className="text-emerald-700 hover:underline disabled:opacity-40">tekrar gönder</button>}
+          {iptalEdilebilir && <button disabled={mesgul} onClick={() => islem("iptal")} className="text-red-700 hover:underline disabled:opacity-40">gönderme (iptal)</button>}
+        </div>
+      )}
     </div>
   );
 }

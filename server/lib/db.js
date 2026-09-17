@@ -361,6 +361,88 @@ const TICKET_SEMA = [
   `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SERVISKAYITLARI_CARI')
    CREATE INDEX IX_SERVISKAYITLARI_CARI ON dbo.SERVISKAYITLARI (FIRMANO, CARIIND)
      INCLUDE (DURUM, KABULTARIHI)`,
+
+  // --- Servis kaydından WhatsApp mesajı (v1.7) ---------------------------
+  // Servis mesajları aynı kuyruğu kullanır; bir servis kaydına birden çok
+  // mesaj gidebildiği için TICKETID boş kalır ve tekillik yalnız dolu
+  // TICKETID'ler için aranır. Eski sürüm ana bilgisayar satırı TICKETID'ye
+  // bakmadan TELEFONLAR/METIN ile gönderdiği için bu değişiklikle uyumludur.
+  `IF COL_LENGTH('dbo.WHATSAPPMESAJLARI','SERVISID') IS NULL
+   ALTER TABLE dbo.WHATSAPPMESAJLARI ADD SERVISID INT NULL`,
+
+  `IF COL_LENGTH('dbo.WHATSAPPMESAJLARI','MESAJTURU') IS NULL
+   ALTER TABLE dbo.WHATSAPPMESAJLARI ADD MESAJTURU NVARCHAR(20) NULL`,
+
+  `IF COL_LENGTH('dbo.WHATSAPPMESAJLARI','GONDEREN') IS NULL
+   ALTER TABLE dbo.WHATSAPPMESAJLARI ADD GONDEREN NVARCHAR(60) NULL`,
+
+  // Kolonu kullanan tekillik kısıtı ve kuyruk indeksi önce kaldırılır; eski
+  // SQL Server sürümleri indeksteki kolonun boş olabilirliğini değiştirmez.
+  // Tek işlemde yapılır ki yarıda kalırsa tablo kısıtsız kalmasın.
+  // Filtreli indeks yüzünden tabloya QUOTED_IDENTIFIER OFF oturumdan yazılamaz;
+  // uygulamanın sürücüsü (tedious) açık bağlanır, elle sqlcmd için -I gerekir.
+  `IF EXISTS (SELECT 1 FROM sys.columns
+             WHERE object_id = OBJECT_ID('dbo.WHATSAPPMESAJLARI') AND name = 'TICKETID' AND is_nullable = 0)
+   BEGIN
+     SET XACT_ABORT ON;
+     BEGIN TRAN;
+     IF OBJECT_ID('dbo.UQ_WHATSAPPMESAJLARI_TICKET', 'UQ') IS NOT NULL
+       ALTER TABLE dbo.WHATSAPPMESAJLARI DROP CONSTRAINT UQ_WHATSAPPMESAJLARI_TICKET;
+     IF EXISTS (SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID('dbo.WHATSAPPMESAJLARI') AND name = 'IX_WHATSAPPMESAJLARI_KUYRUK')
+       DROP INDEX IX_WHATSAPPMESAJLARI_KUYRUK ON dbo.WHATSAPPMESAJLARI;
+     ALTER TABLE dbo.WHATSAPPMESAJLARI ALTER COLUMN TICKETID INT NULL;
+     CREATE UNIQUE INDEX UX_WHATSAPPMESAJLARI_TICKET
+       ON dbo.WHATSAPPMESAJLARI (TICKETID) WHERE TICKETID IS NOT NULL;
+     CREATE INDEX IX_WHATSAPPMESAJLARI_KUYRUK
+       ON dbo.WHATSAPPMESAJLARI (DURUM, KAYITTARIHI, ID)
+       INCLUDE (TICKETID, FIRMANO, DONEMNO, CARIIND, TELEFON);
+     COMMIT;
+   END`,
+
+  // --- Başka bilgisayardaki etiket yazıcısı (v1.7) ------------------------
+  // Yazıcısını paylaşan bilgisayar burada kalp atışı yazar ve istemcilerin
+  // önizlemesi için etiket düzenini yayımlar.
+  `IF OBJECT_ID('dbo.ETIKETYAZICILARI','U') IS NULL
+   CREATE TABLE dbo.ETIKETYAZICILARI (
+     MAKINE            NVARCHAR(128)  NOT NULL PRIMARY KEY,
+     YAZICI            NVARCHAR(200)  NULL,
+     KULLANICI         NVARCHAR(60)   NULL,
+     AYAR              NVARCHAR(MAX)  NULL,
+     AKTIF             BIT            NOT NULL DEFAULT 1,
+     SONHATA           NVARCHAR(500)  NULL,
+     SONYOKLAMA        DATETIME       NOT NULL DEFAULT GETDATE(),
+     GUNCELLEMETARIHI  DATETIME       NOT NULL DEFAULT GETDATE()
+   )`,
+
+  // İstemcilerin etiket bilgisayarına bıraktığı baskı işleri. Etiket metni
+  // saklanmaz; etiket bilgisayarı cihazları basarken veritabanından okur.
+  `IF OBJECT_ID('dbo.ETIKETISLERI','U') IS NULL
+   CREATE TABLE dbo.ETIKETISLERI (
+     ID                BIGINT IDENTITY(1,1) PRIMARY KEY,
+     HEDEFMAKINE       NVARCHAR(128)  NOT NULL,
+     TUR               NVARCHAR(10)   NOT NULL DEFAULT 'SERVIS',
+     SERVISID          INT            NULL,
+     CIHAZIDLER        NVARCHAR(600)  NULL,
+     ADET              INT            NOT NULL DEFAULT 0,
+     DURUM             NVARCHAR(20)   NOT NULL DEFAULT 'BEKLIYOR',
+     DENEME            INT            NOT NULL DEFAULT 0,
+     SONHATA           NVARCHAR(1000) NULL,
+     GONDEREN          NVARCHAR(60)   NOT NULL,
+     GONDERENMAKINE    NVARCHAR(128)  NULL,
+     YAZICI            NVARCHAR(200)  NULL,
+     OLUSTURMATARIHI   DATETIME       NOT NULL DEFAULT GETDATE(),
+     GUNCELLEMETARIHI  DATETIME       NOT NULL DEFAULT GETDATE(),
+     BASIMTARIHI       DATETIME       NULL,
+     CONSTRAINT CK_ETIKETISLERI_DURUM CHECK (DURUM IN ('BEKLIYOR','BASILIYOR','BASILDI','HATA','IPTAL')),
+     CONSTRAINT CK_ETIKETISLERI_TUR CHECK (TUR IN ('SERVIS','DENEME'))
+   )`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_ETIKETISLERI_KUYRUK')
+   CREATE INDEX IX_ETIKETISLERI_KUYRUK ON dbo.ETIKETISLERI (HEDEFMAKINE, DURUM, ID)`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_WHATSAPPMESAJLARI_SERVIS')
+   CREATE INDEX IX_WHATSAPPMESAJLARI_SERVIS ON dbo.WHATSAPPMESAJLARI (SERVISID, ID)`,
 ];
 
 /** Ticket veritabanı yoksa oluşturur, tabloları idempotent şekilde kurar. */
