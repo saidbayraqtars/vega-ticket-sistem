@@ -11,6 +11,7 @@ import { EtiketIsiCubugu, useEtiketIsi } from "./EtiketIsiDurumu";
 import Modal from "./Modal";
 import ServisWhatsappPenceresi from "./ServisWhatsappPenceresi";
 import ServisMesajSablonlari from "./ServisMesajSablonlari";
+import ServisNotlari from "./ServisNotlari";
 import { DURUM_MESAJ_TURU, telefonGoster, turAdi } from "../lib/servisMesaj";
 
 const CINSLER = ["Yazıcı", "Bilgisayar", "Dizüstü", "Monitör", "Tarayıcı", "Yazarkasa", "El Terminali", "Diğer"];
@@ -43,9 +44,10 @@ const tarihSaat = (d) => (d ? new Date(d).toLocaleString("tr-TR", { dateStyle: "
 const tarihTR = (d) => (d ? new Date(d).toLocaleDateString("tr-TR") : "");
 const cihazOzeti = (k) => k.cihazlar.map((c) => [c.CINS, c.MARKA, c.MODEL].filter(Boolean).join(" ")).join(" · ");
 const sonGonderim = (k) => k.gonderimler?.[0] || null;
+// Varsayılan açıktır: kabul mesajı olağan akış, istenmeyen kayıtta tik kaldırılır.
 // Tercih bu bilgisayarda hatırlanır; mesaj yine de pencerede onaylanmadan gitmez.
 const KABUL_MESAJI_ANAHTARI = "vt.servisKabulWhatsapp";
-const tercihOku = () => { try { return localStorage.getItem(KABUL_MESAJI_ANAHTARI) === "1"; } catch { return false; } };
+const tercihOku = () => { try { return localStorage.getItem(KABUL_MESAJI_ANAHTARI) !== "0"; } catch { return true; } };
 const tercihYaz = (acik) => { try { localStorage.setItem(KABUL_MESAJI_ANAHTARI, acik ? "1" : "0"); } catch { /* tercih kaydedilemezse de çalışır */ } };
 const WA_ROZETLERI = {
   GONDERILDI: { ad: "Gönderildi", sinif: "bg-emerald-100 text-emerald-800" },
@@ -100,6 +102,7 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
   const [etiketAyar, setEtiketAyar] = useState(null);
   const [etiketUzak, setEtiketUzak] = useState(null);
   const [waPencere, setWaPencere] = useState(null);
+  const [cariPencere, setCariPencere] = useState(null);
   const [oneri, setOneri] = useState(null);
   const [sablonlarAcik, setSablonlarAcik] = useState(false);
   const [tasarimAcik, setTasarimAcik] = useState(false);
@@ -276,6 +279,32 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
   const barkodYazdir = (kayit) =>
     yazdir(`${kayit.SERVISNO} barkod`, barkodSayfasiHtml({ kayit })).catch((err) => setHata(err.message));
 
+  /** Kabulde yanlış cari seçildiyse kayıt sonradan doğru müşteriye taşınır. */
+  function cariDegistir(kayit, kart) {
+    return calistir(async () => {
+      try {
+        const r = await api.servisGuncelle(kayit.ID, { RV: kayit.RV, CARIIND: kart.IND });
+        kayitGuncelle(r.kayit);
+        setCariPencere(null);
+        await listeYukle();
+        return r;
+      } catch (err) {
+        // Başka biri aynı anda değiştirdiyse kaydın güncel hali gösterilsin.
+        if (err.govde?.kayit) kayitGuncelle(err.govde.kayit);
+        throw err;
+      }
+    }, `${kayit.SERVISNO}: müşteri ${kart.AD} olarak değiştirildi.`);
+  }
+
+  /** Şirket içi not kutusu: ekleme, düzeltme, kaldırma. Müşteriye hiçbir şey gitmez. */
+  function notIslem(is, basari) {
+    return calistir(async () => {
+      const r = await is();
+      kayitGuncelle(r.kayit);
+      return r;
+    }, basari);
+  }
+
   async function takipKaydet(g, yama) {
     await calistir(async () => {
       await api.servisGonderimGuncelle(g.ID, yama);
@@ -376,6 +405,10 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
                 onAdresEtiketi={adresEtiketiBas} onBarkod={barkodYazdir} onTakipKaydet={takipKaydet}
                 onWhatsapp={(k) => setWaPencere({ kayit: k, tur: DURUM_MESAJ_TURU[k.DURUM] || "GENEL" })}
                 onWaMesajIslem={waMesajIslem}
+                onCariDegistir={() => setCariPencere(secili)}
+                onNotEkle={(notu) => notIslem(() => api.servisNotEkle(secili.ID, notu), "Şirket içi not eklendi.")}
+                onNotGuncelle={(notId, notu) => notIslem(() => api.servisNotGuncelle(notId, notu), "Not güncellendi.")}
+                onNotSil={(notId) => notIslem(() => api.servisNotSil(notId), "Not kaldırıldı.")}
               />
             ) : (
               <div className="flex h-full items-center justify-center px-6 text-center text-gray-500">
@@ -415,6 +448,22 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
             setMesaj(`${kayit.SERVISNO}: ${bilgi || "WhatsApp mesajı gönderim sırasına alındı."}`);
           }}
         />
+      )}
+
+      {cariPencere && (
+        <Modal baslik={`${cariPencere.SERVISNO} — müşteriyi değiştir`} onKapat={() => setCariPencere(null)} genislik={640}>
+          <div className="rounded border bg-white p-4">
+            <div className="mb-2 text-[12px] text-gray-600">
+              Şimdiki müşteri: <strong>{cariPencere.CARIADI}</strong>
+              {cariPencere.CARIKODU ? ` (${cariPencere.CARIKODU})` : ""}
+            </div>
+            <Arama firmaNo={firmaNo} donemNo={donemNo} onSec={(k) => cariDegistir(cariPencere, k)} />
+            <p className="mt-2 text-[11px] text-gray-500">
+              Seçtiğiniz müşteri kaydın üstüne yazılır. Telefon ve yetkili değişmez; gerekirse
+              onları da güncelleyin. Basılmış etikette eski ad kalır, etiketi yeniden basın.
+            </p>
+          </div>
+        </Modal>
       )}
 
       {tasarimAcik && <AdresEtiketiTasarimi firmaNo={firmaNo} onKapat={() => setTasarimAcik(false)} />}
@@ -539,7 +588,10 @@ function YeniKabul({ firmaNo, donemNo, yeni, setYeni, etiketAyar, etiketUzak, me
   );
 }
 
-function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarkod, onTakipKaydet, onWhatsapp, onWaMesajIslem }) {
+function ServisDetay({
+  kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarkod, onTakipKaydet, onWhatsapp, onWaMesajIslem,
+  onCariDegistir, onNotEkle, onNotGuncelle, onNotSil,
+}) {
   return (
     <div className="p-4">
       <div className="rounded border bg-white p-3">
@@ -547,7 +599,12 @@ function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarko
           <span className="font-mono text-[18px] font-bold">{kayit.SERVISNO}</span>
           <span className={`rounded px-2 py-0.5 text-[11px] ${durumBilgi(kayit.DURUM).sinif}`}>{durumBilgi(kayit.DURUM).ad}</span>
         </div>
-        <div className="mt-1 text-[14px] font-semibold">{kayit.CARIADI}</div>
+        <div className="mt-1 flex items-center gap-2">
+          <span className="text-[14px] font-semibold">{kayit.CARIADI}</span>
+          <button disabled={mesgul} onClick={onCariDegistir}
+            className="rounded border border-[#c7ccd4] bg-white px-2 py-0.5 text-[11px] disabled:opacity-40"
+            title="Kabulde yanlış cari seçildiyse düzeltin">Müşteriyi değiştir…</button>
+        </div>
         <div className="text-[12px] text-gray-600">
           {kayit.TELEFON || "telefon yok"}{kayit.YETKILI ? ` · ${kayit.YETKILI}` : ""}
         </div>
@@ -570,6 +627,9 @@ function ServisDetay({ kayit, mesgul, onDurum, onEtiket, onAdresEtiketi, onBarko
           WhatsApp mesajı gönder…
         </button>
       </div>
+
+      <ServisNotlari notlar={kayit.notlar || []} mesgul={mesgul}
+        onEkle={onNotEkle} onGuncelle={onNotGuncelle} onSil={onNotSil} />
 
       {kayit.whatsappMesajlari?.length > 0 && (
         <div className="mt-3">

@@ -443,6 +443,29 @@ const TICKET_SEMA = [
 
   `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_WHATSAPPMESAJLARI_SERVIS')
    CREATE INDEX IX_WHATSAPPMESAJLARI_SERVIS ON dbo.WHATSAPPMESAJLARI (SERVISID, ID)`,
+
+  // --- Şirket içi not kutusu (v1.8) --------------------------------------
+  // Müşteriye söylenen fiyat teklifi ve cihaza yapılan işlemler. WhatsApp
+  // kuyruğundan tamamen ayrıdır: buradaki metin müşteriye hiç gitmez.
+  `IF OBJECT_ID('dbo.SERVISNOTLARI','U') IS NULL
+   CREATE TABLE dbo.SERVISNOTLARI (
+     ID               BIGINT IDENTITY(1,1) PRIMARY KEY,
+     SERVISID         INT            NOT NULL,
+     TUR              NVARCHAR(20)   NOT NULL DEFAULT 'NOT',
+     METIN            NVARCHAR(2000) NOT NULL,
+     TUTAR            DECIMAL(18,2)  NULL,
+     YAZAN            NVARCHAR(60)   NOT NULL,
+     TARIH            DATETIME       NOT NULL DEFAULT GETDATE(),
+     DUZENLEYEN       NVARCHAR(60)   NULL,
+     GUNCELLEMETARIHI DATETIME       NULL,
+     SILINDI          BIT            NOT NULL DEFAULT 0,
+     CONSTRAINT FK_SERVISNOTLARI_SERVIS FOREIGN KEY (SERVISID)
+       REFERENCES dbo.SERVISKAYITLARI (ID),
+     CONSTRAINT CK_SERVISNOTLARI_TUR CHECK (TUR IN ('NOT','TEKLIF','ISLEM'))
+   )`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SERVISNOTLARI_SERVIS')
+   CREATE INDEX IX_SERVISNOTLARI_SERVIS ON dbo.SERVISNOTLARI (SERVISID, SILINDI, ID DESC)`,
 ];
 
 /** Ticket veritabanı yoksa oluşturur, tabloları idempotent şekilde kurar. */

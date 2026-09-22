@@ -39,12 +39,15 @@ ERP veritabanına **hiç yazmaz**. Müşteri kartlarını ve cari bakiyeleri sal
 - İşlem kaydedildiği anda mesaj kuyruğa alınır; 30 dakikada gönderilemeyen mesaj iptal edilir.
 - Her ekranda bağlantı durumu ile oturumun hangi kullanıcıda ve bilgisayarda açık olduğu görünür.
 - Gönderilmemiş mesaj düzenlenebilir ve yeniden gönderilebilir.
+- Servis kabulünde WhatsApp kabul mesajı kutusu **varsayılan olarak işaretlidir**; mesaj istenmeyen kayıtta tik kaldırılır. Tercih o bilgisayarda hatırlanır, mesaj yine de pencerede onaylanmadan gitmez.
 - Servis kaydından **isteğe bağlı** mesaj: tür seçilir (kabul edildi, teslime hazır, yetkili servise gönderildi, kargoya verildi, teslim edildi, genel), ortak şablon kayıt bilgileriyle (`{servisno}`, `{cihaz}`, `{kargo}`, `{takipno}` …) doldurulur, metin ve numaralar gönderimden önce değiştirilir. Hiçbir durum değişikliği kendiliğinden mesaj atmaz; kabul, teslime hazır, arıza ve kargo sonrasında yalnız "WhatsApp ile bildir" önerisi çıkar.
 - Servis mesajları kayıt detayında durumuyla listelenir; sıradaki mesaj düzenlenir veya iptal edilir, gönderilemeyen mesaj yeniden gönderilir (ulaşan numaralar atlanır).
 
 ### Servis kabul, arıza ve kargo takibi
 - Müşteri cihazıyla geldiğinde kabul kaydı açılır; her cihaz için termal etiket basılır. Termal etikete logo eklenir; logo ve yazı bloğunun yeri, genişliği ve yazı boyutu ayarlardan sürükleyerek ya da mm olarak değiştirilir.
 - **Başka bilgisayardaki etiket yazıcısı:** yazıcının bağlı olduğu bilgisayar ayarlardan yazıcısını paylaşır; diğer bilgisayarlar onu hedef seçer ve "Etiket bas" işi ortak veritabanındaki kuyruğa (`ETIKETISLERI`) bırakır. Bilgisayarlar birbirine doğrudan bağlanmaz. Durum (sırada / basıldı / hata) ekranda izlenir, basılamayan iş tekrar gönderilir; 10 dakikada basılamayan iş iptal olur. Etiket bilgisayarında pencere kapansa da program tepside çalışır.
+- Kabulde yanlış cari seçildiyse kayıt sonradan doğru müşteriye taşınır; ad ve kod Vega kartından yeniden okunur.
+- **Şirket içi not kutusu:** verilen fiyat teklifi (tutarıyla), yapılan işlem ve iç notlar kayıt detayında tutulur. Bu metinler müşteriye gönderilmez, WhatsApp kuyruğuyla ilgisi yoktur.
 - Sekmeler: Serviste · Arızaya gönderilenler · Kargoya verilenler · Teslim edilenler · İptal edilenler.
 - Arızaya gönderme / kargoya verme penceresi: alıcı adres defteri, Vega'dan müşteri adresi önerisi, kargo firması ve takip numarası. Gönderimler geçmişte ayrı satır olarak saklanır.
 - **A5 adres etiketi** tasarlanabilir: gönderen ve alıcı kutuları, logo, "Dikkat kırılır" işareti, servis/kargo satırı, barkod ve cihaz listesi önizlemede sürüklenerek yerleştirilir; yatay veya dikey A5. Tasarım tüm bilgisayarlarda ortaktır.
@@ -97,6 +100,7 @@ Her bilgisayar kendi yerel sunucusunu çalıştırır ve yalnız `127.0.0.1:3010
 | `SERVISKAYITLARI` | Servis kabulü; `SERVISNO` IDENTITY'den türetilen hesaplanmış kolon |
 | `CIHAZLAR` | Kabuldeki cihazlar, arıza, etiket basım bilgisi |
 | `SERVISGONDERIMLERI` | Arızaya gönderim / kargo geçmişi: alıcı, adres, kargo firması, takip no |
+| `SERVISNOTLARI` | Şirket içi not kutusu: fiyat teklifi (tutar), yapılan işlem, iç not |
 | `WHATSAPPAYARLARI` | Ana bilgisayar, oturumun açık olduğu kullanıcı, bağlantı kalp atışı |
 | `WHATSAPPMESAJLARI` | Merkezi gönderim kuyruğu ve deneme/hata/iptal durumu; işlem kaydı (`TICKETID`) veya servis kaydı (`SERVISID`) mesajı |
 | `WHATSAPPMESAJAYARLARI` | Ortak mesaj şablonu |
@@ -124,6 +128,8 @@ Vega tarafında yalnız `TBLCARI` (müşteri kartı), `TBLCARIHAREKETLERI` (dön
 | `GET /api/servis?grup=` | `acik`, `ariza`, `kargo`, `teslim`, `iptal`, `tumu` listeleri ve adetler |
 | `POST /api/servis` | Servis kabulü |
 | `POST /api/servis/:id/gonderim` | Arızaya gönderme / kargoya verme (durum + gönderim tek işlemde) |
+| `PATCH /api/servis/:id` | Durum, not, yetkili, telefon ve kaydın carisi (`CARIIND`) |
+| `POST /api/servis/:id/notlar` · `PATCH` / `DELETE /api/servis/not/:id` | Şirket içi not kutusu |
 | `PATCH /api/servis/gonderim/:id` | Takip no gibi sonradan belli olan bilgiler |
 | `GET /api/servis/gonderim/adresler` | Daha önce kullanılan alıcılar |
 | `GET /api/servis/:id/musteri-adres` | Vega kartından müşteri adresi |
@@ -151,7 +157,7 @@ npm install --prefix client
 npm install --prefix desktop
 
 npm run dev              # sunucu (3010) + Vite arayüzü (5180)
-npm test --prefix server # 99 test
+npm test --prefix server # 106 test
 npm run build --prefix client
 npm run dist             # Windows kurulum dosyası → dist/
 ```

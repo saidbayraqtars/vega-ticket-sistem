@@ -7,6 +7,7 @@ const { cariTelefonDegeri, cariTelefonu, telefonKolonlariniSirala } = require(".
 const { rvCevir } = require("../lib/ticketKurallari");
 const { disaAktar: whatsappDisaAktar } = require("../lib/whatsappBildirim");
 const { SERVIS_MESAJ_SUTUNLARI } = require("../lib/servisMesaj");
+const { NOT_SUTUNLARI, notNormalize } = require("../lib/servisNotu");
 
 const router = express.Router();
 
@@ -99,13 +100,14 @@ function idListesi(istek, onEk, idler) {
     .join(",");
 }
 
-async function gruplayarakAl(tablo, sutunlar, siralama, servisIdler) {
+async function gruplayarakAl(tablo, sutunlar, siralama, servisIdler, ekKosul = "") {
   const harita = new Map();
   if (!servisIdler.length) return harita;
   const istek = db.ticket().request();
   const r = await istek.query(`
     SELECT ${sutunlar} FROM dbo.${tablo}
-    WHERE SERVISID IN (${idListesi(istek, "s", servisIdler)}) ORDER BY ${siralama}
+    WHERE SERVISID IN (${idListesi(istek, "s", servisIdler)})${ekKosul ? ` AND ${ekKosul}` : ""}
+    ORDER BY ${siralama}
   `);
   for (const satir of r.recordset) {
     if (!harita.has(satir.SERVISID)) harita.set(satir.SERVISID, []);
@@ -114,19 +116,21 @@ async function gruplayarakAl(tablo, sutunlar, siralama, servisIdler) {
   return harita;
 }
 
-/** Kayıtlara cihazları, gönderim geçmişini ve WhatsApp mesajlarını (en yeni başta) ekler. */
+/** Kayıtlara cihazları, gönderim geçmişini, WhatsApp mesajlarını ve şirket içi notları (en yeni başta) ekler. */
 async function ayrintiEkle(kayitlar) {
   const idler = kayitlar.map((k) => k.ID);
-  const [cihazlar, gonderimler, mesajlar] = await Promise.all([
+  const [cihazlar, gonderimler, mesajlar, notlar] = await Promise.all([
     gruplayarakAl("CIHAZLAR", CIHAZ_SUTUNLARI, "SERVISID, SIRA, ID", idler),
     gruplayarakAl("SERVISGONDERIMLERI", GONDERIM_SUTUNLARI, "SERVISID, TARIH DESC, ID DESC", idler),
     gruplayarakAl("WHATSAPPMESAJLARI", SERVIS_MESAJ_SUTUNLARI, "SERVISID, ID DESC", idler),
+    gruplayarakAl("SERVISNOTLARI", NOT_SUTUNLARI, "SERVISID, ID DESC", idler, "SILINDI = 0"),
   ]);
   return kayitlar.map((k) => ({
     ...k,
     cihazlar: cihazlar.get(k.ID) || [],
     gonderimler: gonderimler.get(k.ID) || [],
     whatsappMesajlari: (mesajlar.get(k.ID) || []).map(whatsappDisaAktar),
+    notlar: notlar.get(k.ID) || [],
   }));
 }
 
@@ -545,6 +549,90 @@ router.patch("/gonderim/:id", async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/servis/:id/notlar — şirket içi not (fiyat teklifi, yapılan işlem).
+ * Bu metin müşteriye gönderilmez; WhatsApp kuyruğuyla ilgisi yoktur.
+ */
+router.post("/:id/notlar", async (req, res, next) => {
+  try {
+    const servisId = gecerliId(req.params.id);
+    if (!servisId) return res.status(400).json({ ok: false, mesaj: "Geçersiz ID." });
+    const { hata, tur, metin, tutar } = notNormalize(req.body);
+    if (hata) return res.status(400).json({ ok: false, mesaj: hata });
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+
+    const r = await db.ticket().request()
+      .input("servis", sql.Int, servisId)
+      .input("tur", sql.NVarChar(20), tur)
+      .input("metin", sql.NVarChar(2000), metin)
+      .input("tutar", sql.Decimal(18, 2), tutar)
+      .input("yazan", sql.NVarChar(60), kullanici).query(`
+        IF NOT EXISTS (SELECT 1 FROM dbo.SERVISKAYITLARI WHERE ID = @servis AND SILINDI = 0)
+          THROW 51000, 'Servis kaydı bulunamadı.', 1;
+
+        INSERT INTO dbo.SERVISNOTLARI (SERVISID, TUR, METIN, TUTAR, YAZAN)
+        OUTPUT ${cikti(NOT_SUTUNLARI)}
+        VALUES (@servis, @tur, @metin, @tutar, @yazan)
+      `);
+    res.status(201).json({ ok: true, notu: r.recordset[0], kayit: await tekKayit(servisId) });
+  } catch (err) {
+    if (/Servis kaydı bulunamadı/.test(err.message)) {
+      return res.status(404).json({ ok: false, mesaj: "Servis kaydı bulunamadı." });
+    }
+    next(err);
+  }
+});
+
+/** PATCH /api/servis/not/:id — yazılan notu düzeltme. */
+router.patch("/not/:id", async (req, res, next) => {
+  try {
+    const id = gecerliId(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, mesaj: "Geçersiz ID." });
+    const { hata, tur, metin, tutar } = notNormalize(req.body);
+    if (hata) return res.status(400).json({ ok: false, mesaj: hata });
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+
+    const r = await db.ticket().request()
+      .input("id", sql.BigInt, id)
+      .input("tur", sql.NVarChar(20), tur)
+      .input("metin", sql.NVarChar(2000), metin)
+      .input("tutar", sql.Decimal(18, 2), tutar)
+      .input("kullanici", sql.NVarChar(60), kullanici).query(`
+        UPDATE dbo.SERVISNOTLARI
+        SET TUR = @tur, METIN = @metin, TUTAR = @tutar,
+            DUZENLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+        OUTPUT ${cikti(NOT_SUTUNLARI)}
+        WHERE ID = @id AND SILINDI = 0
+      `);
+    if (!r.recordset.length) return res.status(404).json({ ok: false, mesaj: "Not bulunamadı." });
+    const notu = r.recordset[0];
+    res.json({ ok: true, notu, kayit: await tekKayit(notu.SERVISID) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** DELETE /api/servis/not/:id — notu listeden kaldırır, satır kayıtta kalır. */
+router.delete("/not/:id", async (req, res, next) => {
+  try {
+    const id = gecerliId(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, mesaj: "Geçersiz ID." });
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+    const r = await db.ticket().request()
+      .input("id", sql.BigInt, id)
+      .input("kullanici", sql.NVarChar(60), kullanici).query(`
+        UPDATE dbo.SERVISNOTLARI
+        SET SILINDI = 1, DUZENLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+        OUTPUT INSERTED.SERVISID
+        WHERE ID = @id AND SILINDI = 0
+      `);
+    if (!r.recordset.length) return res.status(404).json({ ok: false, mesaj: "Not bulunamadı." });
+    res.json({ ok: true, kayit: await tekKayit(r.recordset[0].SERVISID) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** PATCH /api/servis/:id — durum, not ve teslim bilgisi. */
 router.patch("/:id", async (req, res, next) => {
   try {
@@ -575,6 +663,24 @@ router.patch("/:id", async (req, res, next) => {
     if (Object.hasOwn(b, "TELEFON")) {
       setler.push("TELEFON = @telefon");
       istek.input("telefon", sql.NVarChar(40), kirp(b.TELEFON, 40));
+    }
+    // Kabulde yanlış cari seçildiyse sonradan düzeltilir. Kod ve ad anlık
+    // görüntüdür; kart sonradan değişse de kaydın gösterdiği müşteri sabit kalır.
+    if (Object.hasOwn(b, "CARIIND")) {
+      const cariInd = gecerliId(b.CARIIND);
+      if (!cariInd) return res.status(400).json({ ok: false, mesaj: "Geçersiz cari." });
+      const mevcut = await db.ticket().request().input("id", sql.Int, id)
+        .query(`SELECT FIRMANO, DONEMNO FROM dbo.SERVISKAYITLARI WHERE ID = @id AND SILINDI = 0`);
+      const satir = mevcut.recordset[0];
+      if (!satir) return res.status(404).json({ ok: false, mesaj: "Servis kaydı bulunamadı." });
+      const { rows } = await cariCache.al(satir.FIRMANO, satir.DONEMNO);
+      const kart = rows.find((x) => x.IND === cariInd);
+      if (!kart) return res.status(404).json({ ok: false, mesaj: "Cari bulunamadı." });
+      setler.push("CARIIND = @cariind", "CARIKODU = @carikodu", "CARIADI = @cariadi");
+      istek
+        .input("cariind", sql.Int, cariInd)
+        .input("carikodu", sql.NVarChar(50), kart.FIRMAKODU ?? null)
+        .input("cariadi", sql.NVarChar(255), kart.AD ?? null);
     }
     if (!setler.length) return res.status(400).json({ ok: false, mesaj: "Değiştirilecek alan yok." });
 
