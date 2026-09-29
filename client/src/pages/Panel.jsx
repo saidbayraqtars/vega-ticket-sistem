@@ -112,7 +112,8 @@ export default function Panel({ firmaNo, donemNo, oturumBilgi, onAyarlar, onKull
       </header>
 
       {gorunum === "ticketlar" ? (
-        <div className="min-h-0 flex-1"><TicketIzgara firmaNo={firmaNo} tetik={ticketTetik} /></div>
+        <div className="min-h-0 flex-1"><TicketIzgara firmaNo={firmaNo} tetik={ticketTetik}
+          onGeriAlindi={() => setTicketTetik((x) => x + 1)} /></div>
       ) : gorunum === "onay" ? (
         <div className="min-h-0 flex-1"><OnayBekleyenler firmaNo={firmaNo} tetik={ticketTetik}
           onOnaylandi={() => setTicketTetik((x) => x + 1)} /></div>

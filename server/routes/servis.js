@@ -24,6 +24,12 @@ const GRUPLAR = {
   teslim: ["TESLIM"],
   iptal: ["IPTAL"],
 };
+/**
+ * Teslim edilenler patron onayına göre iki sekmeye bölünür. Durum aynı
+ * (TESLIM) kalır; ayrım ONAYTARIHI'nin dolu olup olmamasıdır.
+ */
+const ONAY_BEKLEYEN_GRUP = "teslimOnay";
+const ONAY_KOSULU = { teslimOnay: "ONAYTARIHI IS NULL", teslim: "ONAYTARIHI IS NOT NULL" };
 /** Gönderim türü → kayıt durumu. */
 const GONDERIM_DURUMU = { ARIZA: "ARIZADA", KARGO: "KARGODA" };
 const GONDEREN_ANAHTARI = "ADRES_ETIKETI_GONDEREN";
@@ -33,7 +39,7 @@ const TASARIM_EN_FAZLA_KARAKTER = 1_500_000;
 const LOGO_DESENI = /^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
 
 const SERVIS_SUTUNLARI = `ID, SERVISNO, FIRMANO, DONEMNO, CARIIND, CARIKODU, CARIADI, TELEFON,
-  YETKILI, DURUM, NOTU, KABULTARIHI, TESLIMTARIHI, TESLIMALAN,
+  YETKILI, DURUM, NOTU, KABULTARIHI, TESLIMTARIHI, TESLIMALAN, ONAYLAYAN, ONAYTARIHI,
   GUNCELLEYEN, GUNCELLEMETARIHI, SILINDI, RV`;
 const CIHAZ_SUTUNLARI = `ID, SERVISID, SIRA, CINS, MARKA, MODEL, SERINO, ARIZA, AKSESUAR,
   DURUM, YAPILANISLEM, ETIKETBASILDI, ETIKETADEDI, RV`;
@@ -172,8 +178,10 @@ router.get("/", async (req, res, next) => {
       durumlar = [durum];
     } else if (req.query.tumu !== "1" && req.query.grup !== "tumu") {
       const grup = String(req.query.grup || "acik");
-      if (!Object.hasOwn(GRUPLAR, grup)) return res.status(400).json({ ok: false, mesaj: "Geçersiz liste." });
-      durumlar = GRUPLAR[grup];
+      if (grup === ONAY_BEKLEYEN_GRUP) durumlar = GRUPLAR.teslim;
+      else if (Object.hasOwn(GRUPLAR, grup)) durumlar = GRUPLAR[grup];
+      else return res.status(400).json({ ok: false, mesaj: "Geçersiz liste." });
+      if (ONAY_KOSULU[grup]) kosullar.push(ONAY_KOSULU[grup]);
     }
     // Değerler sabit beyaz listeden geliyor; kullanıcı girdisi sorguya girmez.
     if (durumlar) kosullar.push(`DURUM IN (${durumlar.map((d) => `'${d}'`).join(",")})`);
@@ -190,9 +198,12 @@ router.get("/", async (req, res, next) => {
         WHERE ${kosullar.join(" AND ")}
         ORDER BY KABULTARIHI DESC, ID DESC
       `),
+      // Onay bekleyen teslimler ayrı anahtarla sayılır (TESLIM_ONAY).
       db.ticket().request().input("firma", sql.NVarChar(4), firmaNo).query(`
-        SELECT DURUM, COUNT(*) AS ADET FROM dbo.SERVISKAYITLARI
-        WHERE SILINDI = 0 AND FIRMANO = @firma GROUP BY DURUM
+        SELECT S.DURUM, COUNT(*) AS ADET FROM (
+          SELECT CASE WHEN DURUM = 'TESLIM' AND ONAYTARIHI IS NULL THEN 'TESLIM_ONAY' ELSE DURUM END AS DURUM
+          FROM dbo.SERVISKAYITLARI WHERE SILINDI = 0 AND FIRMANO = @firma
+        ) S GROUP BY S.DURUM
       `),
     ]);
     res.json({
@@ -489,7 +500,8 @@ router.post("/:id/gonderim", async (req, res, next) => {
         .input("durum", sql.NVarChar(20), GONDERIM_DURUMU[tur])
         .input("kullanici", sql.NVarChar(60), kullanici).query(`
           UPDATE dbo.SERVISKAYITLARI SET
-            DURUM = @durum, TESLIMTARIHI = NULL, GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+            DURUM = @durum, TESLIMTARIHI = NULL, ONAYLAYAN = NULL, ONAYTARIHI = NULL,
+            GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
           WHERE ID = @id AND SILINDI = 0 AND RV = @rv
         `);
       if (!guncelle.rowsAffected[0]) {
@@ -650,6 +662,8 @@ router.patch("/:id", async (req, res, next) => {
       setler.push("DURUM = @durum");
       // Teslim tarihi elle değil, duruma bağlı yazılır; geri alınırsa temizlenir.
       setler.push("TESLIMTARIHI = CASE WHEN @durum = 'TESLIM' THEN GETDATE() ELSE NULL END");
+      // Her durum değişiminde onay düşer: yeniden teslim edilen kayıt yeniden onay bekler.
+      setler.push("ONAYLAYAN = NULL", "ONAYTARIHI = NULL");
       istek.input("durum", sql.NVarChar(20), durum);
     }
     if (Object.hasOwn(b, "NOTU")) {
@@ -705,6 +719,48 @@ router.patch("/:id", async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * Teslim onayı: onay bekleyen teslim çift tıklamayla onaylanır, onaylanan yine
+ * çift tıklamayla onaya geri alınır. Durum TESLIM kalır; WhatsApp gitmez.
+ */
+function onayRotasi(onayla) {
+  return async (req, res, next) => {
+    try {
+      const id = gecerliId(req.params.id);
+      if (!id) return res.status(400).json({ ok: false, mesaj: "Geçersiz ID." });
+      const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+      const r = await db.ticket().request()
+        .input("id", sql.Int, id)
+        .input("kullanici", sql.NVarChar(60), kullanici).query(`
+          UPDATE dbo.SERVISKAYITLARI SET
+            ${onayla ? "ONAYLAYAN = @kullanici, ONAYTARIHI = GETDATE()" : "ONAYLAYAN = NULL, ONAYTARIHI = NULL"},
+            GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+          OUTPUT INSERTED.ID
+          WHERE ID = @id AND SILINDI = 0 AND DURUM = 'TESLIM'
+            AND ${onayla ? "ONAYTARIHI IS NULL" : "ONAYTARIHI IS NOT NULL"}
+        `);
+      if (!r.recordset.length) {
+        const kayit = await tekKayit(id);
+        if (!kayit) return res.status(404).json({ ok: false, mesaj: "Servis kaydı bulunamadı." });
+        return res.status(409).json({
+          ok: false, cakisma: true, kayit,
+          mesaj: kayit.DURUM !== "TESLIM"
+            ? "Bu kaydın durumu değişmiş; artık teslim edilenlerde değil."
+            : onayla
+              ? "Bu teslim başka bir kullanıcı tarafından zaten onaylandı."
+              : "Bu teslim başka bir kullanıcı tarafından zaten onaya geri alındı.",
+        });
+      }
+      res.json({ ok: true, kayit: await tekKayit(id) });
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+router.post("/:id/onayla", onayRotasi(true));
+router.post("/:id/geri-al", onayRotasi(false));
 
 /** PATCH /api/servis/cihaz/:id — cihaz bilgisi, arıza notu, yapılan işlem. */
 router.patch("/cihaz/:id", async (req, res, next) => {
@@ -809,6 +865,7 @@ router.delete("/:id", async (req, res, next) => {
 module.exports = router;
 module.exports.DURUMLAR = DURUMLAR;
 module.exports.GRUPLAR = GRUPLAR;
+module.exports.ONAY_KOSULU = ONAY_KOSULU;
 module.exports.GONDERIM_DURUMU = GONDERIM_DURUMU;
 module.exports.SERVIS_SUTUNLARI = SERVIS_SUTUNLARI;
 module.exports.CIHAZ_SUTUNLARI = CIHAZ_SUTUNLARI;

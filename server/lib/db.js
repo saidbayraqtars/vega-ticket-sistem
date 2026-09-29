@@ -466,6 +466,16 @@ const TICKET_SEMA = [
 
   `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SERVISNOTLARI_SERVIS')
    CREATE INDEX IX_SERVISNOTLARI_SERVIS ON dbo.SERVISNOTLARI (SERVISID, SILINDI, ID DESC)`,
+
+  // --- Teslimde patron onayı (v1.9) --------------------------------------
+  // Teslim edilen kayıt ONAYTARIHI boşken onay bekler; çift tıklamayla onaylanır.
+  // Özellik gelmeden teslim edilmiş kayıtlar onaylı sayılır ki listeye yığılmasın.
+  // UPDATE EXEC içinde: yeni kolon aynı derlemede henüz tanınmaz.
+  `IF COL_LENGTH('dbo.SERVISKAYITLARI','ONAYTARIHI') IS NULL
+   BEGIN
+     ALTER TABLE dbo.SERVISKAYITLARI ADD ONAYLAYAN NVARCHAR(60) NULL, ONAYTARIHI DATETIME NULL;
+     EXEC('UPDATE dbo.SERVISKAYITLARI SET ONAYTARIHI = ISNULL(TESLIMTARIHI, GETDATE()) WHERE DURUM = ''TESLIM''');
+   END`,
 ];
 
 /** Ticket veritabanı yoksa oluşturur, tabloları idempotent şekilde kurar. */

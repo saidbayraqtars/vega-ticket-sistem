@@ -21,7 +21,7 @@ const ayAnahtari = (d = new Date()) => {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
 };
 
-export default function TicketIzgara({ firmaNo, tetik }) {
+export default function TicketIzgara({ firmaNo, tetik, onGeriAlindi }) {
   const [kayitlar, setKayitlar] = useState([]);
   const [ay, setAy] = useState(() => ayAnahtari());
   const [duzenlenen, setDuzenlenen] = useState(null);
@@ -29,6 +29,7 @@ export default function TicketIzgara({ firmaNo, tetik }) {
   const [uyari, setUyari] = useState(null);
   const [silinecek, setSilinecek] = useState(null);
   const [siliniyor, setSiliniyor] = useState(false);
+  const [geriAlinan, setGeriAlinan] = useState(null);
   const tablo = useTablo({ sirala: "KAPANISTARIHI", yon: "desc" });
   const sonRv = useRef(null);
 
@@ -83,6 +84,23 @@ export default function TicketIzgara({ firmaNo, tetik }) {
     }
   }
 
+  // Düzenleme kutusundaki çift tıklama kelime seçer; satırı geri almaz.
+  async function geriAl(e, kayit) {
+    if (geriAlinan || e.target.closest("input, button")) return;
+    setGeriAlinan(kayit.ID);
+    setUyari(null);
+    try {
+      await api.ticketGeriAl(kayit.ID);
+      setKayitlar((rows) => rows.filter((x) => x.ID !== kayit.ID));
+      onGeriAlindi?.();
+    } catch (err) {
+      setUyari(err.message);
+      await ilkYukle().catch(() => {});
+    } finally {
+      setGeriAlinan(null);
+    }
+  }
+
   async function sil() {
     if (!silinecek) return;
     setSiliniyor(true);
@@ -105,7 +123,10 @@ export default function TicketIzgara({ firmaNo, tetik }) {
           {gorunen.length === kayitlar.length ? `${kayitlar.length} kayıt` : `${gorunen.length} / ${kayitlar.length} kayıt`} · {tl(toplamUcret)} ₺
         </span>
         {tablo.filtreVar && <button onClick={tablo.filtreleriTemizle} className="text-[12px] text-blue-700 hover:underline">Filtreleri temizle</button>}
-        <label className="ml-auto flex items-center gap-2 text-[12px] text-gray-600">
+        <span className="ml-auto rounded bg-amber-50 px-3 py-1 text-[11px] font-medium text-amber-800">
+          Onay bekleyenlere geri almak için tarih, müşteri veya kaydeden hücresine çift tıklayın
+        </span>
+        <label className="flex items-center gap-2 text-[12px] text-gray-600">
           Ay
           <input type="month" value={ay} onChange={(e) => setAy(e.target.value || ayAnahtari())}
             className="rounded border border-[#c7ccd4] bg-white px-2 py-1" />
@@ -117,7 +138,9 @@ export default function TicketIzgara({ firmaNo, tetik }) {
           <colgroup>{SUTUNLAR.map((s) => <col key={s.anahtar} style={{ width: s.genislik }} />)}<col style={{ width: 44 }} /></colgroup>
           <TabloBaslik sutunlar={SUTUNLAR} tablo={tablo} ekSutunlar={1} />
           <tbody>
-            {gorunen.map((k) => <tr key={k.ID}>{SUTUNLAR.map((s) => {
+            {gorunen.map((k) => <tr key={k.ID} onDoubleClick={(e) => geriAl(e, k)}
+              className={geriAlinan === k.ID ? "opacity-50" : undefined}
+              title="Onay bekleyenlere geri almak için çift tıklayın">{SUTUNLAR.map((s) => {
               const aktif = duzenlenen?.id === k.ID && duzenlenen?.alan === s.anahtar;
               const goster = s.bicim ? s.bicim(k[s.anahtar]) : k[s.anahtar] ?? "";
               return <td key={s.anahtar} className={s.sayi ? "sayi" : undefined}

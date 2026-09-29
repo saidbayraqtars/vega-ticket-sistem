@@ -48,7 +48,8 @@ ERP veritabanına **hiç yazmaz**. Müşteri kartlarını ve cari bakiyeleri sal
 - **Başka bilgisayardaki etiket yazıcısı:** yazıcının bağlı olduğu bilgisayar ayarlardan yazıcısını paylaşır; diğer bilgisayarlar onu hedef seçer ve "Etiket bas" işi ortak veritabanındaki kuyruğa (`ETIKETISLERI`) bırakır. Bilgisayarlar birbirine doğrudan bağlanmaz. Durum (sırada / basıldı / hata) ekranda izlenir, basılamayan iş tekrar gönderilir; 10 dakikada basılamayan iş iptal olur. Etiket bilgisayarında pencere kapansa da program tepside çalışır.
 - Kabulde yanlış cari seçildiyse kayıt sonradan doğru müşteriye taşınır; ad ve kod Vega kartından yeniden okunur.
 - **Şirket içi not kutusu:** verilen fiyat teklifi (tutarıyla), yapılan işlem ve iç notlar kayıt detayında tutulur. Bu metinler müşteriye gönderilmez, WhatsApp kuyruğuyla ilgisi yoktur.
-- Sekmeler: Serviste · Arızaya gönderilenler · Kargoya verilenler · Teslim edilenler · İptal edilenler.
+- Sekmeler: Serviste · Arızaya gönderilenler · Kargoya verilenler · Teslim onayı bekleyenler · Teslim edilenler · İptal edilenler.
+- **Teslimde patron onayı:** teslim edilen kayıt önce "Teslim onayı bekleyenler"e düşer; satıra çift tıklanınca onaylanıp "Teslim edilenler"e geçer, orada çift tıklanınca onaya geri döner. Durum değişirse onay düşer. Bu özellikten önce teslim edilmiş kayıtlar onaylı sayılır.
 - Arızaya gönderme / kargoya verme penceresi: alıcı adres defteri, Vega'dan müşteri adresi önerisi, kargo firması ve takip numarası. Gönderimler geçmişte ayrı satır olarak saklanır.
 - **A5 adres etiketi** tasarlanabilir: gönderen ve alıcı kutuları, logo, "Dikkat kırılır" işareti, servis/kargo satırı, barkod ve cihaz listesi önizlemede sürüklenerek yerleştirilir; yatay veya dikey A5. Tasarım tüm bilgisayarlarda ortaktır.
 - **A5 adres etiketi** ve **A5 barkod çıktısı**:
@@ -122,10 +123,12 @@ Vega tarafında yalnız `TBLCARI` (müşteri kartı), `TBLCARIHAREKETLERI` (dön
 | `GET /api/ticket?durum=&ay=` | Onay bekleyen veya aylık tamamlanan işlemler |
 | `POST /api/ticket` | İşlem kaydı + WhatsApp kuyruğu |
 | `POST /api/ticket/:id/onayla` | Onaylayıp tamamlananlara taşıma |
+| `POST /api/ticket/:id/geri-al` | Tamamlananı onay bekleyenlere geri alma (WhatsApp yeniden gitmez) |
 | `PATCH /api/ticket/:id` | İşlem metni / ücret (`RV` zorunlu) |
 | `PATCH /api/ticket/:id/whatsapp` | WhatsApp metnini düzenleme |
 | `GET /api/ticket/degisiklikler` | Çok kullanıcılı canlı değişiklikler |
-| `GET /api/servis?grup=` | `acik`, `ariza`, `kargo`, `teslim`, `iptal`, `tumu` listeleri ve adetler |
+| `GET /api/servis?grup=` | `acik`, `ariza`, `kargo`, `teslimOnay`, `teslim`, `iptal`, `tumu` listeleri ve adetler (onay bekleyen teslim `TESLIM_ONAY` anahtarıyla sayılır) |
+| `POST /api/servis/:id/onayla` · `POST /api/servis/:id/geri-al` | Teslimi onaylama / onaya geri alma |
 | `POST /api/servis` | Servis kabulü |
 | `POST /api/servis/:id/gonderim` | Arızaya gönderme / kargoya verme (durum + gönderim tek işlemde) |
 | `PATCH /api/servis/:id` | Durum, not, yetkili, telefon ve kaydın carisi (`CARIIND`) |

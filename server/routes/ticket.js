@@ -334,6 +334,39 @@ router.post("/:id/onayla", async (req, res, next) => {
   }
 });
 
+/** Yanlış tamamlanan işlem çift tıklamayla onay bekleyenlere döner; WhatsApp yeniden gönderilmez. */
+router.post("/:id/geri-al", async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ ok: false, mesaj: "Geçersiz işlem kimliği." });
+    }
+    const kullanici = String(req.kullanici || "").trim() || "bilinmiyor";
+    const r = await db.ticket().request()
+      .input("id", sql.Int, id)
+      .input("kullanici", sql.NVarChar(60), kullanici).query(`
+        UPDATE dbo.TICKETLER SET
+          DURUM = 'ONAY_BEKLIYOR', KAPANISTARIHI = NULL,
+          ONAYLAYAN = NULL, ONAYTARIHI = NULL,
+          GUNCELLEYEN = @kullanici, GUNCELLEMETARIHI = GETDATE()
+        OUTPUT ${SUTUNLAR.split(",").map((s) => "INSERTED." + s.trim()).join(", ")}
+        WHERE ID = @id AND SILINDI = 0 AND DURUM = 'KAPALI'
+      `);
+    if (!r.recordset.length) {
+      const mevcut = await db.ticket().request().input("id", sql.Int, id)
+        .query("SELECT DURUM, SILINDI FROM dbo.TICKETLER WHERE ID = @id");
+      if (!mevcut.recordset.length || mevcut.recordset[0].SILINDI) {
+        return res.status(404).json({ ok: false, mesaj: "Geri alınacak işlem bulunamadı." });
+      }
+      return res.status(409).json({ ok: false, mesaj: "Bu işlem başka bir kullanıcı tarafından zaten onay bekleyenlere alındı." });
+    }
+    await logYaz(id, kullanici, "DURUM", "KAPALI", "ONAY_BEKLIYOR", "İşlem çift tıklamayla onay bekleyenlere geri alındı.");
+    res.json({ ok: true, kayit: disaAktar(r.recordset[0]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete("/:id", async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);

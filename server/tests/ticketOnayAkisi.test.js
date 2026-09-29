@@ -46,6 +46,15 @@ function sahteIstek() {
           RV: Buffer.from("0000000000000001", "hex"),
         }] };
       }
+      if (metin.includes("DURUM = 'ONAY_BEKLIYOR', KAPANISTARIHI = NULL")) {
+        return { recordset: [{
+          ID: girdiler.id,
+          DURUM: "ONAY_BEKLIYOR",
+          KAPANISTARIHI: null,
+          SILINDI: false,
+          RV: Buffer.from("0000000000000003", "hex"),
+        }] };
+      }
       if (metin.includes("SELECT TOP") && metin.includes("@@DBTS")) {
         return { recordsets: [[], [{ SONRV: Buffer.from("0000000000000002", "hex") }]] };
       }
@@ -112,6 +121,21 @@ test("patron onayı yalnız takip durumunu tamamlar, ikinci WhatsApp göndermez"
 
   assert.equal(sonuc.durum, 200);
   assert.equal(sonuc.govde.kayit.DURUM, "KAPALI");
+  assert.equal(whatsappCagrilari.length, 0);
+});
+
+test("tamamlanan işlem onay bekleyenlere geri alınır, WhatsApp yeniden gönderilmez", async () => {
+  sorgular = [];
+  whatsappCagrilari = [];
+  const sonuc = await calistir(rota("post", "/:id/geri-al"), {
+    params: { id: "17" },
+    kullanici: "Patron",
+  });
+
+  assert.equal(sonuc.durum, 200);
+  assert.equal(sonuc.govde.kayit.DURUM, "ONAY_BEKLIYOR");
+  assert.equal(sonuc.govde.kayit.KAPANISTARIHI, null);
+  assert.match(sorgular[0].metin, /WHERE ID = @id AND SILINDI = 0 AND DURUM = 'KAPALI'/);
   assert.equal(whatsappCagrilari.length, 0);
 });
 

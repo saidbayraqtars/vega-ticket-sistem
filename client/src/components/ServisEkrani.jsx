@@ -32,10 +32,18 @@ const SEKMELER = [
   { grup: "acik", ad: "Serviste", durumlar: ["KABUL", "ISLEMDE", "HAZIR"] },
   { grup: "ariza", ad: "Arızaya gönderilenler", durumlar: ["ARIZADA"] },
   { grup: "kargo", ad: "Kargoya verilenler", durumlar: ["KARGODA"] },
+  // Sunucu onay bekleyen teslimleri TESLIM_ONAY anahtarıyla ayrı sayar.
+  { grup: "teslimOnay", ad: "Teslim onayı bekleyenler", durumlar: ["TESLIM_ONAY"] },
   { grup: "teslim", ad: "Teslim edilenler", durumlar: ["TESLIM"] },
   { grup: "iptal", ad: "İptal edilenler", durumlar: ["IPTAL"] },
-  { grup: "tumu", ad: "Tümü", durumlar: null },
+  { grup: "tumu", ad: "Tümü", durumlar: [...DURUMLAR.map((d) => d.kod), "TESLIM_ONAY"] },
 ];
+/** Çift tıklamanın sekmeye göre işi: onay bekleyen teslimi onaylar, onaylananı geri alır. */
+const CIFT_TIKLAMA = {
+  teslimOnay: { ipucu: "Onaylamak için satıra çift tıklayın", basari: "teslim onaylandı" },
+  teslim: { ipucu: "Onaya geri almak için satıra çift tıklayın", basari: "teslim onaya geri alındı" },
+};
+const onayBekliyor = (k) => k.DURUM === "TESLIM" && !k.ONAYTARIHI;
 const GONDERIM_TURU = { ARIZA: { ad: "Arızaya gönderim", sinif: "bg-orange-100 text-orange-900", grup: "ariza" }, KARGO: { ad: "Kargo", sinif: "bg-violet-100 text-violet-900", grup: "kargo" } };
 
 const durumBilgi = (kod) => DURUMLAR.find((d) => d.kod === kod) || DURUMLAR[0];
@@ -69,10 +77,16 @@ function sutunlarOlustur(grup) {
     {
       anahtar: "DURUM", baslik: "Durum", genislik: 145, tip: "secim",
       secenekler: DURUMLAR.map((d) => ({ deger: d.kod, ad: d.ad })),
-      hucre: (k) => <span className={`rounded px-1.5 py-0.5 text-[11px] ${durumBilgi(k.DURUM).sinif}`}>{durumBilgi(k.DURUM).ad}</span>,
+      hucre: (k) => <DurumRozeti kayit={k} />,
     },
     { anahtar: "KABULTARIHI", baslik: "Kabul", genislik: 125, deger: (k) => tarihDegeri(k.KABULTARIHI), metin: (k) => tarihSaat(k.KABULTARIHI), hucre: (k) => tarihSaat(k.KABULTARIHI) },
   ];
+  if (["teslimOnay", "teslim"].includes(grup)) {
+    sutunlar.push({ anahtar: "TESLIMTARIHI", baslik: "Teslim", genislik: 125, deger: (k) => tarihDegeri(k.TESLIMTARIHI), metin: (k) => tarihSaat(k.TESLIMTARIHI), hucre: (k) => tarihSaat(k.TESLIMTARIHI) });
+  }
+  if (grup === "teslim") {
+    sutunlar.push({ anahtar: "ONAYLAYAN", baslik: "Onaylayan", genislik: 160, deger: (k) => k.ONAYLAYAN || "", hucre: (k) => (k.ONAYLAYAN ? `${k.ONAYLAYAN} · ${tarihTR(k.ONAYTARIHI)}` : "—") });
+  }
   if (["ariza", "kargo", "tumu"].includes(grup)) {
     sutunlar.push(
       { anahtar: "alici", baslik: grup === "kargo" ? "Alıcı" : "Gönderilen yer", genislik: 190, deger: (k) => sonGonderim(k)?.ALICIADI || "" },
@@ -154,7 +168,8 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
     return () => clearInterval(zamanlayici);
   }, [siradaMesajVar, seciliId, kayitGuncelle]);
 
-  const sekmeAdedi = (s) => (s.durumlar ? s.durumlar : DURUMLAR.map((d) => d.kod)).reduce((t, d) => t + (adetler[d] || 0), 0);
+  const sekmeAdedi = (s) => s.durumlar.reduce((t, d) => t + (adetler[d] || 0), 0);
+  const ciftTiklama = CIFT_TIKLAMA[grup];
 
   async function calistir(is, basari) {
     setMesgul(true);
@@ -223,6 +238,22 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
       await listeYukle();
       if (["HAZIR", "TESLIM"].includes(durum.kod)) setOneri({ kayit: r.kayit, tur: DURUM_MESAJ_TURU[durum.kod] });
     }, `${kayit.SERVISNO}: ${durum.ad}.`);
+  }
+
+  /** Teslim onayı sekmelerinde çift tıklama: onayla ya da onaya geri al. */
+  function onayDegistir(kayit) {
+    if (mesgul || !ciftTiklama) return;
+    const onayla = grup === "teslimOnay";
+    calistir(async () => {
+      try {
+        const r = await (onayla ? api.servisOnayla(kayit.ID) : api.servisGeriAl(kayit.ID));
+        setSeciliYedek(r.kayit);
+        return r;
+      } finally {
+        // Başka biri önce davrandıysa da liste güncel hale gelsin.
+        await listeYukle();
+      }
+    }, `${kayit.SERVISNO}: ${ciftTiklama.basari}.`);
   }
 
   /** Mesaj kartındaki düzenle / tekrar gönder / iptal. */
@@ -349,6 +380,11 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
               {s.ad} <span className={grup === s.grup ? "opacity-80" : "text-gray-500"}>({sekmeAdedi(s)})</span>
             </button>
           ))}
+          {ciftTiklama && (
+            <span className="ml-auto self-center rounded bg-amber-50 px-3 py-1 text-[11px] font-medium text-amber-800">
+              {ciftTiklama.ipucu}
+            </span>
+          )}
         </div>
       )}
 
@@ -381,7 +417,8 @@ export default function ServisEkrani({ firmaNo, donemNo }) {
               <tbody>
                 {gorunen.map((k) => (
                   <tr key={k.ID} data-secili={k.ID === seciliId ? "1" : undefined}
-                    onClick={() => setSeciliId(k.ID)} style={{ cursor: "pointer" }}>
+                    onClick={() => setSeciliId(k.ID)} onDoubleClick={() => onayDegistir(k)}
+                    title={ciftTiklama?.ipucu} style={{ cursor: "pointer" }}>
                     {sutunlar.map((s) => {
                       const icerik = s.hucre ? s.hucre(k) : s.deger ? s.deger(k) : k[s.anahtar];
                       return <td key={s.anahtar} title={typeof icerik === "string" ? icerik : undefined}>{icerik}</td>;
@@ -597,7 +634,7 @@ function ServisDetay({
       <div className="rounded border bg-white p-3">
         <div className="flex items-baseline gap-2">
           <span className="font-mono text-[18px] font-bold">{kayit.SERVISNO}</span>
-          <span className={`rounded px-2 py-0.5 text-[11px] ${durumBilgi(kayit.DURUM).sinif}`}>{durumBilgi(kayit.DURUM).ad}</span>
+          <DurumRozeti kayit={kayit} />
         </div>
         <div className="mt-1 flex items-center gap-2">
           <span className="text-[14px] font-semibold">{kayit.CARIADI}</span>
@@ -611,6 +648,7 @@ function ServisDetay({
         <div className="mt-1 text-[11px] text-gray-500">
           Kabul: {tarihSaat(kayit.KABULTARIHI)} · Alan: {kayit.TESLIMALAN}
           {kayit.TESLIMTARIHI ? ` · Teslim: ${tarihSaat(kayit.TESLIMTARIHI)}` : ""}
+          {kayit.ONAYTARIHI ? ` · Onay: ${tarihSaat(kayit.ONAYTARIHI)}${kayit.ONAYLAYAN ? ` (${kayit.ONAYLAYAN})` : ""}` : ""}
         </div>
         {kayit.NOTU && <div className="mt-2 rounded bg-gray-50 px-2 py-1.5 text-[12px]">{kayit.NOTU}</div>}
 
@@ -789,6 +827,14 @@ function GonderimKarti({ gonderim: g, mesgul, onAdresEtiketi, onKaydet }) {
       {g.NOTU && <div className="mt-1 text-[11px] text-gray-600">Not: {g.NOTU}</div>}
     </div>
   );
+}
+
+function DurumRozeti({ kayit }) {
+  if (onayBekliyor(kayit)) {
+    return <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-900">Teslim edildi · onay bekliyor</span>;
+  }
+  const d = durumBilgi(kayit.DURUM);
+  return <span className={`rounded px-1.5 py-0.5 text-[11px] ${d.sinif}`}>{d.ad}</span>;
 }
 
 const Alan = ({ etiket, value, onChange }) => (
