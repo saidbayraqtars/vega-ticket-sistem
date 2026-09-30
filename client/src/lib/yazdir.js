@@ -3,8 +3,9 @@ import { ADRES_ETIKETI_CSS, adresEtiketiSayfasi, sayfaCss, tasarimNormalize } fr
 
 /**
  * A5 adres etiketi ve barkod çıktısı. Termal etiket yazıcısından farklı olarak
- * normal (A4/A5) yazıcıya gider: sayfa gizli bir iframe'e yazılıp tarayıcının
- * yazdırma penceresi açılır, yazıcı ve kâğıt orada seçilir.
+ * normal (A4/A5) yazıcıya gider. Masaüstü uygulamasında önizlemeli yazdırma
+ * penceresi açılır (components/A5YazdirmaPenceresi) ve kâğıt A5 seçili basılır;
+ * tarayıcıda sayfa gizli bir iframe'e yazılıp tarayıcının yazdırma penceresi açılır.
  */
 
 const kacis = (s) =>
@@ -12,13 +13,15 @@ const kacis = (s) =>
 const tarihTR = (d) => (d ? new Date(d).toLocaleDateString("tr-TR") : "");
 const cihazAdi = (c) => [c.CINS, [c.MARKA, c.MODEL].filter(Boolean).join(" ")].filter(Boolean).join(": ") || "Cihaz";
 
-// A5 = 148 × 210 mm; 8 mm kenarla kullanılabilir alan 132 × 194 mm.
+// A5 = 148 × 210 mm; 8 mm kenarla kullanılabilir alan 132 × 194 mm. Sayfa kenar
+// boşluğunu yazıcı belirlerse de taşmasın diye kartlar kalan genişliğe yayılır.
+const KENAR_MM = 8;
 const A5_CSS = `
-  @page { size: A5 portrait; margin: 8mm; }
+  @page { size: A5 portrait; margin: ${KENAR_MM}mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; color: #000; font-family: Arial, Helvetica, sans-serif;
     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sayfa { width: 132mm; min-height: 193mm; display: flex; flex-direction: column; gap: 3mm; break-after: page; }
+  .sayfa { width: 100%; display: flex; flex-direction: column; gap: 3mm; break-after: page; }
   .sayfa:last-child { break-after: auto; }
   .kart { display: grid; grid-template-columns: auto 1fr; gap: 4mm; align-items: center;
     border: 0.3mm dashed #000; padding: 2.5mm 3mm; break-inside: avoid; }
@@ -26,8 +29,37 @@ const A5_CSS = `
   .kart .alt { font-size: 9pt; line-height: 1.3; }
 `;
 
-/** HTML'i gizli iframe'de açıp yazdırma penceresini gösterir. */
-export function yazdir(baslik, govde, { css = "" } = {}) {
+const belgeHtml = (baslik, govde, css) =>
+  `<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>${kacis(baslik)}</title><style>${A5_CSS}${css}</style></head><body>${govde}</body></html>`;
+
+// Ekranda @page kenar boşluğu uygulanmaz; önizlemede gövde dolgusuyla gösterilir.
+const onizlemeCss = (kenar) => `html { background: #fff; } body { padding: ${kenar}mm; }`;
+
+// Masaüstü uygulamasındaki yazdırma penceresi açılınca buraya bağlanır.
+let pencereAc = null;
+export function yazdirmaPenceresiBagla(ac) {
+  pencereAc = ac;
+  return () => { if (pencereAc === ac) pencereAc = null; };
+}
+
+/**
+ * A5 sayfayı yazdırır. `yon` kâğıdın yönü, `kenar` sayfa kenar boşluğudur (mm).
+ * Pencere kapanınca (yazdırıldı ya da vazgeçildi) çözülür.
+ */
+export function yazdir(baslik, govde, { css = "", yon = "dikey", kenar = KENAR_MM } = {}) {
+  const html = belgeHtml(baslik, govde, css);
+  if (window.vegaMasaustu?.a5Yazdir && pencereAc) {
+    return new Promise((cozumle) => pencereAc({
+      baslik, html, yon, kenar,
+      onizleme: belgeHtml(baslik, govde, css + onizlemeCss(kenar)),
+      bitti: cozumle,
+    }));
+  }
+  return tarayicidaYazdir(html);
+}
+
+/** HTML'i gizli iframe'de açıp tarayıcının yazdırma penceresini gösterir. */
+function tarayicidaYazdir(html) {
   return new Promise((cozumle, reddet) => {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -36,7 +68,7 @@ export function yazdir(baslik, govde, { css = "" } = {}) {
     document.body.appendChild(iframe);
     const belge = iframe.contentDocument;
     belge.open();
-    belge.write(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>${kacis(baslik)}</title><style>${A5_CSS}${css}</style></head><body>${govde}</body></html>`);
+    belge.write(html);
     belge.close();
     setTimeout(() => {
       try {
@@ -58,7 +90,7 @@ export function adresEtiketiYazdir({ kayit, gonderim, gonderen, tasarim }) {
   return yazdir(
     `${kayit.SERVISNO || "Örnek"} adres etiketi`,
     adresEtiketiSayfasi({ kayit, gonderim, gonderen, tasarim: duzen }),
-    { css: ADRES_ETIKETI_CSS + sayfaCss(duzen) },
+    { css: ADRES_ETIKETI_CSS + sayfaCss(duzen), yon: duzen.yon, kenar: 0 },
   );
 }
 

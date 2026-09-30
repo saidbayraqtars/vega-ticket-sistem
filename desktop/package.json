@@ -1,6 +1,6 @@
 {
   "name": "vega-ticket-desktop",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "private": true,
   "description": "Vega Ticket Sistem — Electron masaüstü sarmalayıcı",
   "main": "main.js",
@@ -35,6 +35,8 @@
     },
     "files": [
       "main.js",
+      "preload.js",
+      "a5Yazdir.js",
       "package.json"
     ],
     "extraResources": [

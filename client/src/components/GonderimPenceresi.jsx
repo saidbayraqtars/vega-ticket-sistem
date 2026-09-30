@@ -164,7 +164,7 @@ export default function GonderimPenceresi({ kayit, tur, firmaNo, onKapat, onKayd
       <p className="mt-2 text-[11px] text-gray-500">
         Kaydedince kayıt “{ariza ? "Arızaya gönderildi" : "Kargoya verildi"}” durumuna geçer ve
         “{ariza ? "Arızaya gönderilenler" : "Kargoya verilenler"}” listesinde görünür. A5 çıktı normal yazıcıya gider;
-        yazdırma penceresinde kâğıt boyutunu A5 seçin. Logo ve yazıların yeri servis ekranındaki “A5 etiket tasarımı”ndan ayarlanır.
+        yazdırma penceresinde önizleme görünür, kâğıt A5 seçili gelir. Logo ve yazıların yeri servis ekranındaki “A5 etiket tasarımı”ndan ayarlanır.
       </p>
     </Modal>
   );

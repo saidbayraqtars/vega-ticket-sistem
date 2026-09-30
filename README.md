@@ -52,7 +52,7 @@ ERP veritabanına **hiç yazmaz**. Müşteri kartlarını ve cari bakiyeleri sal
 - **Teslimde patron onayı:** teslim edilen kayıt önce "Teslim onayı bekleyenler"e düşer; satıra çift tıklanınca onaylanıp "Teslim edilenler"e geçer, orada çift tıklanınca onaya geri döner. Durum değişirse onay düşer. Bu özellikten önce teslim edilmiş kayıtlar onaylı sayılır.
 - Arızaya gönderme / kargoya verme penceresi: alıcı adres defteri, Vega'dan müşteri adresi önerisi, kargo firması ve takip numarası. Gönderimler geçmişte ayrı satır olarak saklanır.
 - **A5 adres etiketi** tasarlanabilir: gönderen ve alıcı kutuları, logo, "Dikkat kırılır" işareti, servis/kargo satırı, barkod ve cihaz listesi önizlemede sürüklenerek yerleştirilir; yatay veya dikey A5. Tasarım tüm bilgisayarlarda ortaktır.
-- **A5 adres etiketi** ve **A5 barkod çıktısı**:
+- **A5 adres etiketi** ve **A5 barkod çıktısı** önizlemeli yazdırma penceresinden alınır; kâğıt A5 seçili gönderilir, yazıcı bilgisayarda hatırlanır:
 
 | A5 adres etiketi | A5 barkod kartları |
 |---|---|

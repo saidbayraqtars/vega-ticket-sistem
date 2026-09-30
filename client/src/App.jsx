@@ -3,6 +3,7 @@ import { api, kullaniciAyarla, oturumAyarla, GIRIS_GEREKLI_OLAYI } from "./api/c
 import Kurulum from "./pages/Kurulum";
 import Panel from "./pages/Panel";
 import Giris from "./pages/Giris";
+import A5YazdirmaPenceresi from "./components/A5YazdirmaPenceresi";
 
 export default function App() {
   const [durum, setDurum] = useState(null);
@@ -91,19 +92,22 @@ export default function App() {
   }
 
   return (
-    <Panel
-      firmaNo={durum.config.firmaNo}
-      donemNo={durum.config.donemNo}
-      oturumBilgi={oturumBilgi}
-      onAyarlar={() => setKurulumZorla(true)}
-      onKullaniciDegistir={() => setKullaniciDegistir(true)}
-      onOturumDegisti={oturumYukle}
-      onCikis={async () => {
-        await api.cikis().catch(() => { /* oturum zaten düşmüş olabilir */ });
-        oturumAyarla("");
-        const r = await oturumYukle();
-        if (!r?.girisGerekli) setKullaniciDegistir(true);
-      }}
-    />
+    <>
+      <Panel
+        firmaNo={durum.config.firmaNo}
+        donemNo={durum.config.donemNo}
+        oturumBilgi={oturumBilgi}
+        onAyarlar={() => setKurulumZorla(true)}
+        onKullaniciDegistir={() => setKullaniciDegistir(true)}
+        onOturumDegisti={oturumYukle}
+        onCikis={async () => {
+          await api.cikis().catch(() => { /* oturum zaten düşmüş olabilir */ });
+          oturumAyarla("");
+          const r = await oturumYukle();
+          if (!r?.girisGerekli) setKullaniciDegistir(true);
+        }}
+      />
+      <A5YazdirmaPenceresi />
+    </>
   );
 }

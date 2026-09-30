@@ -3,6 +3,7 @@ const { autoUpdater } = require("electron-updater");
 const { fork } = require("child_process");
 const path = require("path");
 const http = require("http");
+const { yazdirmaKanallariniKur } = require("./a5Yazdir");
 
 const PORT = parseInt(process.env.VEGA_TICKET_PORT, 10) || 3010;
 const gelistirme = !app.isPackaged;
@@ -239,6 +240,7 @@ function pencereOlustur() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
   pencere.removeMenu();
@@ -298,6 +300,7 @@ if (!tekOrnek) {
       app.quit();
       return;
     }
+    yazdirmaKanallariniKur(PORT);
     pencereOlustur();
     guncellemeSisteminiKur();
 
