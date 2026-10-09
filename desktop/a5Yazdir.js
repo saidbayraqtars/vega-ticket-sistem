@@ -3,7 +3,7 @@ const fs = require("fs/promises");
 const path = require("path");
 
 const YAZDIRMA_HATALARI = {
-  "Invalid printer settings": "Yazıcı bu ayarı kabul etmedi. Yazıcının A5 kâğıdı desteklediğini kontrol edin.",
+  "Invalid printer settings": "Yazıcı bu ayarı kabul etmedi. Yazıcının seçilen kâğıdı desteklediğini kontrol edin.",
   "Invalid deviceName provided": "Seçilen yazıcı bu bilgisayarda bulunamadı.",
   "Print job canceled": "Yazdırma iptal edildi.",
   "Print job failed": "Yazıcı işi reddetti. Yazıcının açık ve bağlı olduğunu kontrol edin.",
@@ -12,12 +12,13 @@ const A5_ZAMAN_ASIMI_MS = 60000;
 const A5_EN_FAZLA_KARAKTER = 8_000_000;
 
 /**
- * A5 sayfayı seçilen yazıcıya kâğıt boyutu A5 seçili olarak gönderir.
+ * A5 sayfayı seçilen yazıcıya kâğıt boyutu seçili olarak gönderir: A5 ya da
+ * A4 (sayfa A4'ün üst yarısına yerleşmiş gelir, bkz. client/src/lib/yazdir.js).
  * window.print() Electron'da Windows yazdırma penceresini açar: önizleme yoktur
  * ve kâğıt yazıcının varsayılanında (çoğunlukla A4) kalır. Bu yüzden sayfa gizli
  * bir pencereye yüklenir ve kâğıt, yön, kenar boşluğu buradan verilerek basılır.
  */
-async function a5Yazdir({ html, yatay, kenarsiz, yazici, kopya }) {
+async function a5Yazdir({ html, kagit, yatay, kenarsiz, yazici, kopya }) {
   if (typeof html !== "string" || !html || html.length > A5_EN_FAZLA_KARAKTER) throw new Error("Yazdırılacak sayfa geçersiz.");
   // Logolu sayfa data: adresine sığmayabilir; geçici dosyadan yüklenir.
   const dosya = path.join(app.getPath("temp"), `vega-a5-${process.pid}-${Date.now()}.html`);
@@ -34,8 +35,8 @@ async function a5Yazdir({ html, yatay, kenarsiz, yazici, kopya }) {
         silent: true,
         // Boş ad Windows varsayılan yazıcısıdır.
         deviceName: String(yazici || ""),
-        pageSize: "A5",
-        landscape: Boolean(yatay),
+        pageSize: kagit === "A4" ? "A4" : "A5",
+        landscape: kagit !== "A4" && Boolean(yatay),
         // "default" sayfanın kendi @page kenar boşluğunu kullanır.
         margins: { marginType: kenarsiz ? "none" : "default" },
         scaleFactor: 100,

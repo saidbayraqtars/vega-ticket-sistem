@@ -253,7 +253,7 @@ export default function AdresEtiketiTasarimi({ firmaNo, onKapat }) {
             )}
           </div>
           <p className="mt-2 text-[11px] text-gray-500">
-            Baskı kâğıt <strong>A5</strong>, kenar boşluğu <strong>yok</strong> ve ölçek <strong>%100</strong> ayarıyla gönderilir; yazıcıya A5 kâğıt takın.
+            Baskı kenar boşluğu <strong>yok</strong> ve ölçek <strong>%100</strong> ayarıyla, yazdırma penceresinde seçilen kâğıda gönderilir: <strong>A4'ün yarısı</strong> (A4 kâğıdın üst yarısı) ya da <strong>A5</strong>.
             Yazıcı kenara çok yakın yeri basamaz; öğeleri kenardan en az 5 mm içeride tutun.
           </p>
         </div>

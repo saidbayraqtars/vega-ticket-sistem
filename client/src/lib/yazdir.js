@@ -35,6 +35,25 @@ const belgeHtml = (baslik, govde, css) =>
 // Ekranda @page kenar boşluğu uygulanmaz; önizlemede gövde dolgusuyla gösterilir.
 const onizlemeCss = (kenar) => `html { background: #fff; } body { padding: ${kenar}mm; }`;
 
+/**
+ * A4 kâğıdın üst yarısına (210 × 148,5 mm) basmak için. A4 takılı yazıcıya A5
+ * gönderilince sürücü sayfayı A4'ün ortasına koyuyor; burada kâğıt A4 seçilir ve
+ * A5 yatay ölçüdeki içerik üst yarıya yerleşir. Dikey A5 tasarım (148 × 210 mm)
+ * üst yarıya sığsın diye 90° döndürülür. Kenar boşluklu (akan) sayfalarda alt
+ * kenar boşluğu sayfanın alt yarısını kapatır; sığmayan kartlar sonraki A4'e geçer.
+ */
+export const A4_YARI_MM = 148.5;
+const a4YariCss = (yon, kenar) => {
+  if (kenar > 0) return `@page { size: A4 portrait; margin: ${kenar}mm ${kenar}mm ${297 - A4_YARI_MM + kenar}mm ${kenar}mm; }`;
+  return `@page { size: A4 portrait; margin: 0; }
+  html, body { width: 210mm; height: ${A4_YARI_MM}mm; overflow: hidden; }
+  ${yon === "dikey" ? "body > * { transform-origin: 0 0; transform: translateY(148mm) rotate(-90deg); }" : ""}`;
+};
+// Önizlemede kâğıdın ortası (katlama/kesme yeri) kesik çizgiyle gösterilir.
+const a4YariOnizlemeCss = (kenar) =>
+  `html { background: #fff repeating-linear-gradient(to right, #9aa3ad 0 2mm, transparent 2mm 4mm) 0 ${A4_YARI_MM}mm / 100% 0.3mm no-repeat; min-height: 297mm; }
+  body { padding: ${kenar}mm; }`;
+
 // Masaüstü uygulamasındaki yazdırma penceresi açılınca buraya bağlanır.
 let pencereAc = null;
 export function yazdirmaPenceresiBagla(ac) {
@@ -50,8 +69,14 @@ export function yazdir(baslik, govde, { css = "", yon = "dikey", kenar = KENAR_M
   const html = belgeHtml(baslik, govde, css);
   if (window.vegaMasaustu?.a5Yazdir && pencereAc) {
     return new Promise((cozumle) => pencereAc({
-      baslik, html, yon, kenar,
-      onizleme: belgeHtml(baslik, govde, css + onizlemeCss(kenar)),
+      baslik, yon, kenar,
+      kagitlar: {
+        a5: { html, onizleme: belgeHtml(baslik, govde, css + onizlemeCss(kenar)) },
+        a4yari: {
+          html: belgeHtml(baslik, govde, css + a4YariCss(yon, kenar)),
+          onizleme: belgeHtml(baslik, govde, css + a4YariCss(yon, kenar) + a4YariOnizlemeCss(kenar)),
+        },
+      },
       bitti: cozumle,
     }));
   }
