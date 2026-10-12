@@ -179,3 +179,7 @@ npm run release   # GitHub yazma yetkili GH_TOKEN gerekir
 ```
 
 Yayın betiği tag ve release kaydını hazırlar, testleri çalıştırır, arayüzü derler ve Electron kurulumunu yükler. Sürüm notları `RELEASE-NOTES-*.md` dosyalarındadır.
+
+---
+
+**Lisans:** Kaynak kod tescillidir — tüm hakları saklıdır. İzinsiz kullanılamaz, kopyalanamaz, dağıtılamaz ya da satılamaz. Ayrıntı: [LICENSE](LICENSE).
