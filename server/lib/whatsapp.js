@@ -5,6 +5,19 @@ const { normalizeTelefon } = require("./telefon");
 // Electron bu değişkeni kullanıcı profilindeki yazılabilir dizine yönlendirir.
 const baseDir = process.env.VEGA_TICKET_BASE_DIR || path.join(__dirname, "..");
 const authDir = path.join(baseDir, "whatsapp-auth");
+// Durdurma kaydı auth klasöründe durur: uygulama yeniden başlasa (güncelleme,
+// Windows açılışı) bile kısıtlı hesaba tekrar bağlanmaya çalışılmaz. Oturum
+// sıfırlanınca klasörle birlikte silinir.
+const durdurmaDosyasi = path.join(authDir, "durduruldu.json");
+
+// Bu kodlarda yeniden bağlanmak hesabı kurtarmaz, kısıtlamayı ağırlaştırır.
+// 403: hesap kısıtlandı/banlandı · 401: oturum telefondan kapatıldı ·
+// 440: aynı oturum başka yerde açıldı.
+const DURDURAN_KODLAR = {
+  401: "WhatsApp oturumu kapatılmış. Oturumu sıfırlayıp QR kodunu yeniden okutun.",
+  403: "WhatsApp bu numarayı kısıtladı (403). Otomatik bağlanma durduruldu; telefonda numaranın durumunu kontrol edin, açıldıktan sonra \"Yeniden bağlan\"a basın.",
+  440: "WhatsApp oturumu başka bir yerde açıldı (440). İki uygulamanın aynı oturumu kullanmadığından emin olup \"Yeniden bağlan\"a basın.",
+};
 
 let socket = null;
 let hazir = false;
@@ -16,6 +29,58 @@ let tekrarTimer = null;
 let deneme = 0;
 let oturumNo = 0;
 let baileysPromise = null;
+let durdurma;
+
+// Rehberde olmayan numaralara sık "WhatsApp'ta var mı" sorgusu ban sinyalidir.
+// Sonuç bellekte tutulur: kayıtlı numara 7 gün, kayıtsız numara 1 gün.
+const KAYIT_VAR_MS = 7 * 24 * 60 * 60 * 1000;
+const KAYIT_YOK_MS = 24 * 60 * 60 * 1000;
+const kayitOnbellek = new Map();
+
+/** Önbellekteki geçerli kayıt; süresi dolmuşsa siler. */
+function onbellektenKayit(telefon, simdi = Date.now()) {
+  const k = kayitOnbellek.get(telefon);
+  if (!k) return null;
+  if (simdi - k.zaman >= (k.exists ? KAYIT_VAR_MS : KAYIT_YOK_MS)) {
+    kayitOnbellek.delete(telefon);
+    return null;
+  }
+  return k;
+}
+
+async function kayitSorgula(telefon) {
+  const onbellekte = onbellektenKayit(telefon);
+  if (onbellekte) return onbellekte;
+  const kayit = await socket.onWhatsApp(telefon);
+  if (!Array.isArray(kayit) || !kayit.length) return null;
+  const sonuc = { exists: Boolean(kayit[0]?.exists), jid: kayit[0]?.jid || null, zaman: Date.now() };
+  kayitOnbellek.set(telefon, sonuc);
+  return sonuc;
+}
+
+function durdurmaOku() {
+  if (durdurma === undefined) {
+    try {
+      durdurma = JSON.parse(fs.readFileSync(durdurmaDosyasi, "utf8"));
+    } catch {
+      durdurma = null;
+    }
+  }
+  return durdurma;
+}
+
+function durdur(kod) {
+  durdurma = { kod, mesaj: DURDURAN_KODLAR[kod], zaman: new Date().toISOString() };
+  try {
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(durdurmaDosyasi, JSON.stringify(durdurma));
+  } catch { /* bellekteki kayıt bu çalışma için yeterli */ }
+}
+
+function durdurmaKaldir() {
+  durdurma = null;
+  fs.rmSync(durdurmaDosyasi, { force: true });
+}
 
 const baileysYukle = () => {
   if (!baileysPromise) baileysPromise = import("@whiskeysockets/baileys");
@@ -23,7 +88,15 @@ const baileysYukle = () => {
 };
 
 function durum() {
-  return { hazir, baslatiliyor, qr, hata, hesap };
+  const d = durdurmaOku();
+  return {
+    hazir,
+    baslatiliyor,
+    qr,
+    hata: d ? d.mesaj : hata,
+    hesap,
+    durduruldu: d ? { kod: d.kod, zaman: d.zaman } : null,
+  };
 }
 
 function tekrarPlanla() {
@@ -44,7 +117,7 @@ function socketKapat() {
 }
 
 async function baslat() {
-  if (hazir || baslatiliyor || socket) return durum();
+  if (hazir || baslatiliyor || socket || durdurmaOku()) return durum();
   baslatiliyor = true;
   hata = null;
   const buOturum = ++oturumNo;
@@ -96,9 +169,9 @@ async function baslat() {
         if (socket === yeniSocket) socket = null;
         const err = lastDisconnect?.error;
         const kod = err?.output?.statusCode ?? err?.statusCode;
-        if (kod === DisconnectReason.loggedOut) {
-          hata = "WhatsApp oturumu kapatılmış. Oturumu sıfırlayıp QR kodunu yeniden okutun.";
+        if ([DisconnectReason.loggedOut, DisconnectReason.forbidden, DisconnectReason.connectionReplaced].includes(kod)) {
           qr = null;
+          durdur(kod);
           return;
         }
         deneme++;
@@ -130,15 +203,15 @@ async function gonder(telefon, metin) {
   }
 
   try {
-    const kayit = await socket.onWhatsApp(temiz);
-    if (!Array.isArray(kayit) || !kayit.length) {
+    const kayit = await kayitSorgula(temiz);
+    if (!kayit) {
       return { gonderildi: false, telefon: temiz, mesaj: "Numaranın WhatsApp kaydı doğrulanamadı." };
     }
-    if (!kayit[0]?.exists) {
+    if (!kayit.exists) {
       return { gonderildi: false, telefon: temiz, mesaj: "Bu numara WhatsApp kullanmıyor." };
     }
 
-    const jid = kayit[0].jid || `${temiz}@s.whatsapp.net`;
+    const jid = kayit.jid || `${temiz}@s.whatsapp.net`;
     try {
       await socket.presenceSubscribe(jid);
       await socket.sendPresenceUpdate("composing", jid);
@@ -162,7 +235,24 @@ async function sifirla() {
   qr = null;
   hata = null;
   hesap = null;
+  deneme = 0;
+  // Yeni QR başka bir numarayla okutulabilir; o hesabın sorgusu ayrıdır.
+  kayitOnbellek.clear();
   fs.rmSync(authDir, { recursive: true, force: true });
+  durdurma = null;
+  return baslat();
+}
+
+/** 403/440 sonrası kullanıcı numaranın açıldığını doğruladığında; oturum korunur. */
+async function yenidenBaglan() {
+  oturumNo++;
+  if (tekrarTimer) { clearTimeout(tekrarTimer); tekrarTimer = null; }
+  socketKapat();
+  hazir = false;
+  baslatiliyor = false;
+  hata = null;
+  deneme = 0;
+  durdurmaKaldir();
   return baslat();
 }
 
@@ -186,4 +276,4 @@ function sessizLogger() {
   return logger;
 }
 
-module.exports = { durum, baslat, gonder, sifirla, kapat, authDir };
+module.exports = { KAYIT_VAR_MS, KAYIT_YOK_MS, kayitOnbellek, onbellektenKayit, DURDURAN_KODLAR, durum, baslat, gonder, sifirla, yenidenBaglan, kapat, authDir };

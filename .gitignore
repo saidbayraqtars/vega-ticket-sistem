@@ -7,6 +7,7 @@ server/public/
 server/config.json
 server/logs/
 server/whatsapp-auth/
+server/whatsapp-gonderimler.json
 *.log
 .env
 .env.*

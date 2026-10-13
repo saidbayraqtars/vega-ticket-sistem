@@ -3,6 +3,7 @@ const sql = require("mssql");
 const db = require("./db");
 const cfg = require("./config");
 const whatsapp = require("./whatsapp");
+const hiz = require("./whatsappHiz");
 const { SURESI_DOLDU, SURE_HATASI, telefonListesi } = require("./whatsappBildirim");
 
 const MAKINE = os.hostname().trim();
@@ -28,6 +29,8 @@ let calisiyor = false;
 let yerelOturumAcik = false;
 let sonTemizlik = 0;
 let bosTur = 0;
+// Saatlik/günlük sınır dolunca ekranlarda görünen açıklama.
+let hizNotu = null;
 // Bu süreçte gönderimi süren satırlar — takılan talep temizliği bunlara dokunmaz.
 const ucustakiler = new Set();
 
@@ -136,15 +139,23 @@ async function ilerlemeKaydet(id, gonderilenler) {
     `);
 }
 
-/** Mesajı kalan her numaraya sırayla gönderir; biri başarısızsa kayıt HATA olur. */
-async function mesajiGonder(mesaj, gonder = whatsapp.gonder, ilerleme = ilerlemeKaydet) {
+const GERCEK_HIZ = { aralikBekle: hiz.aralikBekle, kaydet: hiz.kaydet };
+
+/**
+ * Mesajı kalan her numaraya sırayla gönderir; biri başarısızsa kayıt HATA olur.
+ * Numaralar arasında rastgele aralık beklenir. Her deneme sayılır: başarısız
+ * gönderim de WhatsApp'a numara sorgusu atmıştır.
+ */
+async function mesajiGonder(mesaj, gonder = whatsapp.gonder, ilerleme = ilerlemeKaydet, hizlar = GERCEK_HIZ) {
   const toplam = telefonListesi(mesaj.TELEFONLAR || mesaj.TELEFON).length;
   if (!toplam) return { gonderildi: false, mesaj: "Caride WhatsApp'a uygun cep telefonu bulunamadı." };
   const gonderilenler = telefonListesi(mesaj.GONDERILENLER);
   const hatalar = [];
   let mesajId = null;
   for (const telefon of kalanAlicilar(mesaj)) {
+    await hizlar.aralikBekle();
     const sonuc = await gonder(telefon, mesaj.METIN);
+    hizlar.kaydet();
     if (sonuc.gonderildi) {
       gonderilenler.push(telefon);
       mesajId = sonuc.mesajId || mesajId;
@@ -191,7 +202,10 @@ async function dongu() {
     yerelOturumAcik = true;
     await whatsapp.baslat();
     const waDurum = whatsapp.durum();
-    await kalpAtisi(waDurum);
+    // Mesaj en çok üç numaraya gider; yarıda kalmasın diye üç gönderimlik yer aranır.
+    const hizDurumu = hiz.bekleme(3);
+    hizNotu = hiz.sinirNotu(hizDurumu);
+    await kalpAtisi({ ...waDurum, hata: waDurum.hata || hizNotu });
 
     if (Date.now() - sonTemizlik >= TEMIZLIK_ARALIGI_MS) {
       await eskiMesajlariKapat();
@@ -199,7 +213,7 @@ async function dongu() {
     }
 
     let isVardi = false;
-    if (waDurum.hazir) {
+    if (waDurum.hazir && !hizNotu) {
       const mesaj = await siradakiMesajiAl();
       if (mesaj) {
         isVardi = true;
@@ -256,7 +270,8 @@ async function durumAl() {
     hazir: ana ? Boolean(yerel?.hazir) : Boolean(ayar?.BAGLI && yoklamaTaze),
     baslatiliyor: ana ? Boolean(yerel?.baslatiliyor) : false,
     hesap: ana ? yerel?.hesap || null : ayar?.HESAP || null,
-    hata: ana ? yerel?.hata || null : yoklamaTaze ? ayar?.SONHATA || null : ayar ? "Ana bilgisayara ulaşılamıyor." : null,
+    durduruldu: ana ? yerel?.durduruldu || null : null,
+    hata: ana ? yerel?.hata || hizNotu || null : yoklamaTaze ? ayar?.SONHATA || null : ayar ? "Ana bilgisayara ulaşılamıyor." : null,
     qr: ana ? yerel?.qr || null : null,
     sonYoklama: ayar?.SONYOKLAMA || null,
   };

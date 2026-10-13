@@ -44,6 +44,18 @@ export default function WhatsAppAyarlari() {
     }
   }
 
+  async function yenidenBaglan() {
+    setMesgul(true);
+    try {
+      await api.whatsappYenidenBaglan();
+      await durumYukle();
+    } catch (err) {
+      setDurum((onceki) => ({ ...onceki, hata: err.message }));
+    } finally {
+      setMesgul(false);
+    }
+  }
+
   async function anaYap() {
     setMesgul(true);
     try {
@@ -89,14 +101,22 @@ export default function WhatsAppAyarlari() {
       <legend className="px-1 text-[12px] font-semibold text-gray-600">WhatsApp bağlantısı</legend>
       <div className="flex items-center gap-2">
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${durum?.hazir ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-          {durum?.hazir ? "BAĞLI" : durum?.baslatiliyor ? "BAĞLANIYOR" : "BAĞLI DEĞİL"}
+          {durum?.hazir ? "BAĞLI" : durum?.durduruldu ? "DURDURULDU" : durum?.baslatiliyor ? "BAĞLANIYOR" : "BAĞLI DEĞİL"}
         </span>
         {durum?.hesap && <span className="font-mono text-[11px] text-gray-600">+{durum.hesap}</span>}
         {durum?.buMakineAna ? (
-          <button type="button" onClick={sifirla} disabled={mesgul}
-            className="ml-auto rounded border border-[#c7ccd4] px-3 py-1.5 text-[11px] disabled:opacity-40">
-            {mesgul ? "Sıfırlanıyor…" : "Oturumu sıfırla"}
-          </button>
+          <div className="ml-auto flex gap-2">
+            {durum?.durduruldu && durum.durduruldu.kod !== 401 && (
+              <button type="button" onClick={yenidenBaglan} disabled={mesgul}
+                className="rounded bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40">
+                {mesgul ? "Bağlanıyor…" : "Yeniden bağlan"}
+              </button>
+            )}
+            <button type="button" onClick={sifirla} disabled={mesgul}
+              className="rounded border border-[#c7ccd4] px-3 py-1.5 text-[11px] disabled:opacity-40">
+              {mesgul ? "Sıfırlanıyor…" : "Oturumu sıfırla"}
+            </button>
+          </div>
         ) : (
           <button type="button" onClick={anaYap} disabled={mesgul}
             className="ml-auto rounded bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40">

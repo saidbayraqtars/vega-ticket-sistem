@@ -89,6 +89,21 @@ router.post("/sifirla", async (req, res, next) => {
   }
 });
 
+/** 403/440 ile durdurulan bağlantıyı oturumu silmeden yeniden dener. */
+router.post("/yeniden-baglan", async (req, res, next) => {
+  try {
+    const merkez = await worker.durumAl();
+    if (!merkez.buMakineAna) {
+      return res.status(403).json({ ok: false, mesaj: "WhatsApp yalnız ana bilgisayardan yeniden bağlanabilir." });
+    }
+    await whatsapp.yenidenBaglan();
+    worker.uyandir();
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post("/ana-yap", async (req, res, next) => {
   try {
     const durum = await worker.anaMakineYap(req.kullanici);

@@ -39,6 +39,8 @@ ERP veritabanına **hiç yazmaz**. Müşteri kartlarını ve cari bakiyeleri sal
 - İşlem kaydedildiği anda mesaj kuyruğa alınır; 30 dakikada gönderilemeyen mesaj iptal edilir.
 - Her ekranda bağlantı durumu ile oturumun hangi kullanıcıda ve bilgisayarda açık olduğu görünür.
 - Gönderilmemiş mesaj düzenlenebilir ve yeniden gönderilebilir.
+- **Ban koruması:** numaralar arasında 20-45 sn rastgele bekleme; saatte 30, 24 saatte 150 gönderim (her numara bir gönderim). Sınır dolunca kuyruk bekler ve ekranlarda açıklama görünür. Numara kaydı sorgusu önbellekte tutulur (kayıtlı 7 gün, kayıtsız 1 gün).
+- WhatsApp numarayı kısıtlarsa (403), oturum telefondan kapatılırsa (401) ya da başka yerde açılırsa (440) otomatik bağlanma durur; uygulama yeniden başlasa da denemez. 403/440'ta ana bilgisayarda **Yeniden bağlan**, 401'de **Oturumu sıfırla** kullanılır.
 - Servis kabulünde WhatsApp kabul mesajı kutusu **varsayılan olarak işaretlidir**; mesaj istenmeyen kayıtta tik kaldırılır. Tercih o bilgisayarda hatırlanır, mesaj yine de pencerede onaylanmadan gitmez.
 - Servis kaydından **isteğe bağlı** mesaj: tür seçilir (kabul edildi, teslime hazır, yetkili servise gönderildi, kargoya verildi, teslim edildi, genel), ortak şablon kayıt bilgileriyle (`{servisno}`, `{cihaz}`, `{kargo}`, `{takipno}` …) doldurulur, metin ve numaralar gönderimden önce değiştirilir. Hiçbir durum değişikliği kendiliğinden mesaj atmaz; kabul, teslime hazır, arıza ve kargo sonrasında yalnız "WhatsApp ile bildir" önerisi çıkar.
 - Servis mesajları kayıt detayında durumuyla listelenir; sıradaki mesaj düzenlenir veya iptal edilir, gönderilemeyen mesaj yeniden gönderilir (ulaşan numaralar atlanır).
@@ -148,6 +150,7 @@ Vega tarafında yalnız `TBLCARI` (müşteri kartı), `TBLCARIHAREKETLERI` (dön
 | `GET /api/etiket/is/:id` · `POST …/tekrar` | Uzak baskı işinin durumu, basılamayan işi yeniden sıraya alma |
 | `GET /api/whatsapp/durum` | Bağlantı, ana bilgisayar ve oturum kullanıcısı |
 | `GET` / `POST /api/whatsapp/sablon` | Ortak mesaj şablonu |
+| `POST /api/whatsapp/yeniden-baglan` | 403/440 ile durdurulan bağlantıyı oturumu silmeden yeniden deneme (yalnız ana bilgisayar) |
 | `POST /api/whatsapp/gonder` | Başarısız bildirimi yeniden gönderme |
 | `GET /api/kullanici/liste` · `POST /api/kullanici/giris` · `POST /api/kullanici/pin` | Kullanıcı seçimi, PIN girişi, PIN yönetimi |
 

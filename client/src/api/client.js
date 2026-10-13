@@ -143,6 +143,7 @@ export const api = {
   whatsappSablon: () => istek("/api/whatsapp/sablon"),
   whatsappSablonKaydet: (sablon) => istek("/api/whatsapp/sablon", govdeli("POST", { sablon })),
   whatsappSifirla: () => istek("/api/whatsapp/sifirla", { method: "POST" }),
+  whatsappYenidenBaglan: () => istek("/api/whatsapp/yeniden-baglan", { method: "POST" }),
   whatsappAnaYap: () => istek("/api/whatsapp/ana-yap", { method: "POST" }),
   whatsappMesajDurumu: (ticketId) => istek(`/api/whatsapp/mesaj/${ticketId}`),
   whatsappGonder: (veri) => istek("/api/whatsapp/gonder", govdeli("POST", veri)),
